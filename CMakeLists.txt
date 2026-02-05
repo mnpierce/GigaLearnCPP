@@ -21,3 +21,11 @@ target_link_libraries(GigaLearnBot GigaLearnCPP)
 # Include RLBot
 add_subdirectory(RLBotCPP)
 target_link_libraries(GigaLearnBot RLBotCPP)
+
+# --- Copy Collision Meshes ---
+add_custom_command(TARGET GigaLearnBot POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/../collision_meshes"
+    "$<TARGET_FILE_DIR:GigaLearnBot>/collision_meshes"
+    COMMENT "Copying collision meshes..."
+)

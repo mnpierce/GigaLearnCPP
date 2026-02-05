@@ -4,17 +4,15 @@ project("GigaLearnCPP")
 
 include_directories("${PROJECT_SOURCE_DIR}/src/")
 
-# Make sure CMake finds libtorch if its in this directory
-if (EXISTS "${PROJECT_SOURCE_DIR}/libtorch/")
-	message("Using local libtorch folder...")
-	list(APPEND CMAKE_PREFIX_PATH "libtorch")
-	# Make ultra-sure we can find libtorch if its local
-	set(CMAKE_PREFIX_PATH "libtorch/share/cmake/Torch")
-endif()
-
 # Add libtorch (https://pytorch.org/cppdocs/installing.html#minimal-example)
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+
+# Fix for missing CUDA::nvToolsExt target in Torch's CMake config
+if(NOT TARGET CUDA::nvToolsExt)
+	message("Mocking CUDA::nvToolsExt as empty interface...")
+	add_library(CUDA::nvToolsExt INTERFACE IMPORTED)
+endif()
 
 # Add all headers and code files
 file(GLOB_RECURSE FILES_SRC "src/*.cpp" "src/*.h" "src/*.hpp" "libsrc/*.cpp" "libsrc/.h" "libsrc/.hpp")
@@ -44,16 +42,18 @@ target_link_libraries(GigaLearnCPP PUBLIC RLGymCPP)
 target_include_directories(GigaLearnCPP PUBLIC "${PROJECT_SOURCE_DIR}/libsrc/json")
 
 # Include python
-find_package(Python COMPONENTS Interpreter Development)
-find_package(PythonLibs REQUIRED)
-include_directories(${PYTHON_INCLUDE_DIRS})
-target_link_libraries(GigaLearnCPP PUBLIC ${PYTHON_LIBRARIES})
+find_package(Python COMPONENTS Interpreter Development REQUIRED)
+include_directories(${Python_INCLUDE_DIRS})
+target_link_libraries(GigaLearnCPP PUBLIC ${Python_LIBRARIES})
 message("Found Python:")
-message("PYTHON_LIBRARIES: ${PYTHON_LIBRARIES}")
-message("PYTHON_INCLUDE_DIRS: ${PYTHON_INCLUDE_DIRS}")
+message("Python_LIBRARIES: ${Python_LIBRARIES}")
+message("Python_INCLUDE_DIRS: ${Python_INCLUDE_DIRS}")
 message("Python_RUNTIME_LIBRARY_DIRS: ${Python_RUNTIME_LIBRARY_DIRS}")
 message("Python_EXECUTABLE: ${Python_EXECUTABLE}")
-add_definitions(-DPY_EXEC_PATH="${Python_EXECUTABLE}") # Give C++ access to the executable path
+
+# Fix backslashes for C++ string literal
+string(REPLACE "\\" "/" SAFE_PYTHON_EXECUTABLE "${Python_EXECUTABLE}")
+target_compile_definitions(GigaLearnCPP PUBLIC PY_EXEC_PATH="${SAFE_PYTHON_EXECUTABLE}")
 
 # Include pybind11
 add_subdirectory(pybind11)
