@@ -269,7 +269,7 @@ void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report)
 		}
 
 		if (renderSender)
-			renderSender->Send(skill.envSet->state.gameStates[0]);
+			renderSender->Send(skill.envSet->state.gameStates[0], skill.envSet->rewards[0]);
 	}
 
 	for (auto& pair : skill.curRatings.data) {
@@ -299,7 +299,7 @@ void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report)
 	}
 }
 
-void GGL::PolicyVersionManager::OnIteration(struct PPOLearner* ppo, Report& report, int64_t totalTimesteps, int64_t prevTotalTimesteps) {
+void GGL::PolicyVersionManager::OnIteration(class PPOLearner* ppo, Report& report, int64_t totalTimesteps, int64_t prevTotalTimesteps) {
 	if ((totalTimesteps / tsPerVersion > prevTotalTimesteps / tsPerVersion) || (prevTotalTimesteps == 0)) {
 		// Save version
 		AddVersion(ppo->GetPolicyModels(), totalTimesteps);
