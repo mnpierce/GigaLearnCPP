@@ -10,37 +10,51 @@
 #include <RLGymCPP/StateSetters/RandomState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 
+#include "rewards.h"
+#include <iostream>
+
 using namespace GGL; // GigaLearn
 using namespace RLGC; // RLGymCPP
 
+// --- CONFIGURATION ---
+enum TrainingStage {
+	EARLY, // 0-100M steps: Learn to touch ball
+	MID,   // 100M-1B steps: Learn to score
+	LATE   // 1B+ steps: Advanced mechanics & kickoffs
+};
+
+// ** CHANGE THIS TO SWITCH STAGES **
+const TrainingStage CURRENT_STAGE = TrainingStage::MID;
+
 // Create the RLGymCPP environment for each of our games
 EnvCreateResult EnvCreateFunc(int index) {
-	// These are ok rewards that will produce a scoring bot in ~100m steps
-	std::vector<WeightedReward> rewards = {
+	std::vector<WeightedReward> rewards;
 
-		// Movement
-		{ new AirReward(), 0.25f },
-
-		// Player-ball
-		{ new FaceBallReward(), 0.25f },
-		{ new VelocityPlayerToBallReward(), 4.f },
-		{ new StrongTouchReward(20, 100), 60 },
-
-		// Ball-goal
-		{ new ZeroSumReward(new VelocityBallToGoalReward(), 1), 2.0f },
-
-		// Boost
-		{ new PickupBoostReward(), 10.f },
-		{ new SaveBoostReward(), 0.2f },
-
-		// Game events
-		{ new ZeroSumReward(new BumpReward(), 0.5f), 20 },
-		{ new ZeroSumReward(new DemoReward(), 0.5f), 80 },
-		{ new GoalReward(), 150 }
-	};
+	if (CURRENT_STAGE == TrainingStage::EARLY) {
+		rewards.push_back(WeightedReward(new InAirReward(), 0.15f));
+		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
+		rewards.push_back(WeightedReward(new CustomFaceBallReward(), 0.5f));
+		rewards.push_back(WeightedReward(new TouchReward(), 50.0f));
+	} else if (CURRENT_STAGE == TrainingStage::MID) {
+		rewards.push_back(WeightedReward(new InAirReward(), 0.15f));
+		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
+		rewards.push_back(WeightedReward(new CustomFaceBallReward(), 0.5f));
+		rewards.push_back(WeightedReward(new CustomVelocityBallToGoalReward(), 10.0f));
+		rewards.push_back(WeightedReward(new GoalReward(), 1000.0f));
+		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
+	} else {
+		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
+		rewards.push_back(WeightedReward(new JumpTouchReward(), 200.0f));
+		rewards.push_back(WeightedReward(new CustomFaceBallReward(), 0.5f));
+		rewards.push_back(WeightedReward(new CustomVelocityBallToGoalReward(), 20.0f));
+		rewards.push_back(WeightedReward(new GoalReward(), 1500.0f));
+		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
+		rewards.push_back(WeightedReward(new KickoffReward(), 10.0f));
+		rewards.push_back(WeightedReward(new FirstTouchKickoffReward(), 500.0f));
+	}
 
 	std::vector<TerminalCondition*> terminalConditions = {
-		new NoTouchCondition(10),
+		new NoTouchCondition(30), // 30 seconds
 		new GoalScoreCondition()
 	};
 
@@ -96,7 +110,7 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 int main(int argc, char* argv[]) {
 	// Initialize RocketSim with collision meshes
 	// Change this path to point to your meshes!
-	RocketSim::Init("C:\\Users\\admin\\source\\repos\\RLArenaCollisionDumper\\collision_meshes");
+	RocketSim::Init("./collision_meshes");
 
 	// Make configuration for the learner
 	LearnerConfig cfg = {};
@@ -106,55 +120,68 @@ int main(int argc, char* argv[]) {
 	cfg.tickSkip = 8;
 	cfg.actionDelay = cfg.tickSkip - 1; // Normal value in other RLGym frameworks
 
-	// Play around with this to see what the optimal is for your machine, more games will consume more RAM
+	// --- Common Settings (Defaults) ---
 	cfg.numGames = 256;
+	cfg.ppo.epochs = 2;
+	cfg.ppo.entropyScale = 0.01f;
 
-	// Leave this empty to use a random seed each run
-	// The random seed can have a strong effect on the outcome of a run
-	cfg.randomSeed = 123;
+	cfg.sendMetrics = true;
+	cfg.metricsProjectName = "gigalearncpp";
+	cfg.metricsGroupName = "MattBot-v1";
 
-	int tsPerItr = 50'000;
-	cfg.ppo.tsPerItr = tsPerItr;
-	cfg.ppo.batchSize = tsPerItr;
-	cfg.ppo.miniBatchSize = 50'000; // Lower this if too much VRAM is being allocated
+	cfg.renderMode = false; // Fixed infinite loop in source, now we can render and train!
+	cfg.renderTimeScale = 1.0f;
+	std::cout << "Debug: renderTimeScale set to " << cfg.renderTimeScale << std::endl;
 
-	// Using 2 epochs seems pretty optimal when comparing time training to skill
-	// Perhaps 1 or 3 is better for you, test and find out!
-	cfg.ppo.epochs = 1;
+	cfg.ppo.sharedHead.layerSizes = {};
+	cfg.ppo.policy.layerSizes = { 512, 512, 512 };
+	cfg.ppo.critic.layerSizes = { 512, 512, 512 };
 
-	// This scales differently than "ent_coef" in other frameworks
-	// This is the scale for normalized entropy, which means you won't have to change it if you add more actions
-	cfg.ppo.entropyScale = 0.035f;
+	// --- Skill Tracker (ELO) Settings ---
+	cfg.skillTracker.enabled = true;
+	cfg.skillTracker.numArenas = 16;      // How many games to run at once for ELO testing
+	cfg.skillTracker.updateInterval = 300; // Run ELO matches every 10 iterations
+	cfg.skillTracker.simTime = 60.0f;     // How long each ELO match lasts (seconds)
+	cfg.savePolicyVersions = true;        // Required to save snapshots for ELO testing
+	
 
-	// Rate of reward decay
-	// Starting low tends to work out
-	cfg.ppo.gaeGamma = 0.99;
-
-	// Good learning rate to start
-	cfg.ppo.policyLR = 1.5e-4;
-	cfg.ppo.criticLR = 1.5e-4;
-
-	cfg.ppo.sharedHead.layerSizes = { 256, 256 };
-	cfg.ppo.policy.layerSizes = { 256, 256, 256 };
-	cfg.ppo.critic.layerSizes = { 256, 256, 256 };
-
-	auto optim = ModelOptimType::ADAM;
-	cfg.ppo.policy.optimType = optim;
-	cfg.ppo.critic.optimType = optim;
-	cfg.ppo.sharedHead.optimType = optim;
-
-	auto activation = ModelActivationType::RELU;
-	cfg.ppo.policy.activationType = activation;
-	cfg.ppo.critic.activationType = activation;
-	cfg.ppo.sharedHead.activationType = activation;
-
-	bool addLayerNorm = true;
-	cfg.ppo.policy.addLayerNorm = addLayerNorm;
-	cfg.ppo.critic.addLayerNorm = addLayerNorm;
-	cfg.ppo.sharedHead.addLayerNorm = addLayerNorm;
-
-	cfg.sendMetrics = true; // Send metrics
-	cfg.renderMode = false; // Don't render
+	// --- Stage-Specific Settings ---
+	if (CURRENT_STAGE == EARLY) {
+		cfg.checkpointFolder = "checkpoints/early";
+		cfg.metricsRunName = "early";
+		cfg.tsPerVersion = 25'000'000;        // Save a new version every 25M steps
+		cfg.tsPerSave = 50'000'000;
+		cfg.timestepLimit = 100'000'000;
+		cfg.ppo.tsPerItr = 50000;
+		cfg.ppo.batchSize = 50000;
+		cfg.ppo.miniBatchSize = 25000;
+		cfg.ppo.policyLR = 2e-4;
+		cfg.ppo.criticLR = 2e-4;
+	} else if (CURRENT_STAGE == MID) {
+		cfg.checkpointFolder = "checkpoints/mid";
+		cfg.metricsRunName = "mid";
+		cfg.tsPerVersion = 100'000'000;
+		cfg.tsPerSave = 250'000'000;
+		cfg.timestepLimit = 2'000'000'000;
+		cfg.ppo.tsPerItr = 100000;
+		cfg.ppo.batchSize = 100000;
+		cfg.ppo.miniBatchSize = 25000;
+		cfg.ppo.policyLR = 1.5e-4;
+		cfg.ppo.criticLR = 1.5e-4;
+		cfg.ppo.gaeGamma = 0.993f;
+	} else { // LATE
+		cfg.checkpointFolder = "checkpoints/late";
+		cfg.metricsRunName = "late";
+		cfg.tsPerVersion = 500'000'000;
+		cfg.tsPerSave = 1'000'000'000;
+		cfg.timestepLimit = 5'000'000'000;
+		cfg.ppo.tsPerItr = 200000;
+		cfg.ppo.batchSize = 200000;
+		cfg.ppo.miniBatchSize = 50000;
+		cfg.ppo.policyLR = 1e-4;
+		cfg.ppo.criticLR = 1e-4;
+		cfg.ppo.gaeGamma = 0.995f;
+	}
 
 	// Make the learner with the environment creation function and the config we just made
 	Learner* learner = new Learner(EnvCreateFunc, cfg, StepCallback);
