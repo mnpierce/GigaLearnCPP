@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <RLGymCPP/Gamestates/GameState.h>
 #include <RLGymCPP/BasicTypes/Action.h>
+#include <RLGymCPP/Rewards/Reward.h>
 #include <GigaLearnCPP/Util/Timer.h>
 
 namespace GGL {
@@ -17,7 +18,7 @@ namespace GGL {
 
 		RG_NO_COPY(RenderSender);
 
-		void Send(const RLGC::GameState& state);
+		void Send(const RLGC::GameState& state, const std::vector<RLGC::WeightedReward>& rewards);
 
 		~RenderSender();
 	};

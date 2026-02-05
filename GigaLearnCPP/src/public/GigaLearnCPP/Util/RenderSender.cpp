@@ -77,7 +77,7 @@ std::vector<json> ActionSetToJSON(const std::vector<Action>& actions) {
 	return js;
 }
 
-void GGL::RenderSender::Send(const GameState& state) {
+void GGL::RenderSender::Send(const GameState& state, const std::vector<WeightedReward>& rewards) {
 	json j = {};
 	j["gamemode"] = state.lastArena ? GAMEMODE_STRS[(int)state.lastArena->gameMode] : "soccar";
 	j["state"] = GameStateToJSON(state);
@@ -88,6 +88,18 @@ void GGL::RenderSender::Send(const GameState& state) {
 
 	j["actions"] = ActionSetToJSON(actions);
 	
+	// Add reward breakdown
+	json rewardMap = {};
+	for (int i = 0; i < state.players.size(); i++) {
+		json playerRewards = {};
+		for (auto& weightedReward : rewards) {
+			float val = weightedReward.reward->GetReward(state.players[i], state, false);
+			playerRewards[weightedReward.reward->GetName()] = val * weightedReward.weight;
+		}
+		rewardMap[std::to_string(i)] = playerRewards;
+	}
+	j["rewards"] = rewardMap;
+
 	std::string jStr = j.dump();
 
 	try {
