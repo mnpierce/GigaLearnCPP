@@ -11,19 +11,35 @@ def init(py_exec_path, project, group, name, id = None):
 
 	global wandb_run
 	
-	# Fix the path of our interpreter so wandb doesn't run RLGym_PPO instead of Python
-	# Very strange fix for a very strange problem
+	import traceback
+	
+	# Clean and make path absolute
+	py_exec_path = os.path.abspath(py_exec_path.lstrip("@"))
 	sys.executable = py_exec_path
 	
+	print(f"DEBUG: Python version: {sys.version}")
+	
 	try:
-		site_packages_dir = os.path.join(os.path.join(os.path.dirname(py_exec_path), "Lib"), "site-packages")
-		sys.path.append(site_packages_dir)
-		site.addsitedir(site_packages_dir)
+		py_exec_dir = os.path.dirname(py_exec_path)
+		
+		# Try to find site-packages
+		if os.path.basename(py_exec_dir).lower() == "scripts":
+			site_packages_dir = os.path.abspath(os.path.join(os.path.dirname(py_exec_dir), "Lib", "site-packages"))
+		else:
+			site_packages_dir = os.path.abspath(os.path.join(py_exec_dir, "Lib", "site-packages"))
+			
+		print(f"DEBUG: py_exec_path = {py_exec_path}")
+		print(f"DEBUG: site_packages_dir = {site_packages_dir}")
+		
+		if site_packages_dir not in sys.path:
+			sys.path.insert(0, site_packages_dir)
+		
 		import wandb
+		print(f"Imported wandb from: {getattr(wandb, '__file__', 'NONE')}")
 	except Exception as e:
+		traceback.print_exc()
 		raise Exception(f"""
-			FAILED to import wandb! Make sure GigaLearnCPP isn't using the wrong Python installation.
-			This installation's site packages: {site.getsitepackages()}
+			FAILED to import wandb! 
 			Exception: {repr(e)}"""
 		)
 	
