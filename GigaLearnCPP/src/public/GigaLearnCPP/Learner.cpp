@@ -133,8 +133,13 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 		versionMgr = NULL;
 	}
 
-	if (!config.checkpointFolder.empty())
-		Load();
+	if (!config.checkpointFolder.empty()) {
+		try {
+			Load();
+		} catch (std::exception& e) {
+			RG_ERR_CLOSE("Fatal error during Load(): " << e.what());
+		}
+	}
 
 	if (config.savePolicyVersions && !config.renderMode) {
 		if (config.checkpointFolder.empty())
@@ -167,7 +172,7 @@ void GGL::Learner::SaveStats(std::filesystem::path path) {
 	j["total_timesteps"] = totalTimesteps;
 	j["total_iterations"] = totalIterations;
 
-	if (config.sendMetrics)
+	if (config.sendMetrics && metricSender)
 		j["run_id"] = metricSender->curRunID;
 
 	if (returnStat)
@@ -193,15 +198,15 @@ void GGL::Learner::LoadStats(std::filesystem::path path) {
 		RG_ERR_CLOSE(ERROR_PREFIX << "Can't open file at " << path);
 
 	json j = json::parse(fIn);
-	totalTimesteps = j["total_timesteps"];
-	totalIterations = j["total_iterations"];
+	totalTimesteps = j.value("total_timesteps", (uint64_t)0);
+	totalIterations = j.value("total_iterations", (uint64_t)0);
 
 	if (j.contains("run_id"))
 		runID = j["run_id"];
 
-	if (returnStat)
+	if (returnStat && j.contains("return_stat"))
 		returnStat->ReadFromJSON(j["return_stat"]);
-	if (obsStat)
+	if (obsStat && j.contains("obs_stat"))
 		obsStat->ReadFromJSON(j["obs_stat"]);
 
 	if (versionMgr)
@@ -332,7 +337,7 @@ void GGL::Learner::StartTransferLearn(const TransferLearnConfig& tlConfig) {
 	}
 
 	try {
-		bool saveQueued;
+		bool saveQueued = false;
 		std::thread keyPressThread;
 		StartQuitKeyThread(saveQueued, keyPressThread);
 
@@ -366,7 +371,6 @@ void GGL::Learner::StartTransferLearn(const TransferLearnConfig& tlConfig) {
 					allNewActionMasks += envSet->state.actionMasks.data;
 
 					// Run all old obs and old action parser on each player
-					// TODO: Could be multithreaded
 					for (int arenaIdx = 0; arenaIdx < envSet->arenas.size(); arenaIdx++) {
 						auto& gs = envSet->state.gameStates[arenaIdx];
 						for (auto& player : gs.players) {
@@ -421,7 +425,7 @@ void GGL::Learner::StartTransferLearn(const TransferLearnConfig& tlConfig) {
 				versionMgr->OnIteration(ppo, report, totalTimesteps, prevTimesteps);
 
 			if (saveQueued) {
-				if (!config.checkpointFolder.empty())
+				if (!config.checkpointFolder.empty() && !config.renderMode)
 					Save();
 				exit(0);
 			}
@@ -471,7 +475,7 @@ void GGL::Learner::Start() {
 		RG_LOG("\t(Render mode enabled)");
 
 	try {
-		bool saveQueued;
+		bool saveQueued = false;
 		std::thread keyPressThread;
 		StartQuitKeyThread(saveQueued, keyPressThread);
 
@@ -507,7 +511,7 @@ void GGL::Learner::Start() {
 		auto trajectories = std::vector<Trajectory>(numPlayers, Trajectory{});
 		int maxEpisodeLength = (int)(config.ppo.maxEpisodeDuration * (120.f / config.tickSkip));
 
-		while (true) {
+		while (totalTimesteps < config.timestepLimit || config.timestepLimit == 0 || render) {
 			Report report = {};
 
 			bool isFirstIteration = (totalTimesteps == 0);
@@ -531,7 +535,7 @@ void GGL::Learner::Start() {
 				if (shouldTrainAgainstOld) {
 					// Set up training against old versions
 
-					int oldVersionIdx = RocketSim::Math::RandInt(0, versionMgr->versions.size());
+					int oldVersionIdx = RocketSim::Math::RandInt(0, (int)versionMgr->versions.size());
 					oldVersion = &versionMgr->versions[oldVersionIdx];
 
 					Team oldVersionTeam = Team(RocketSim::Math::RandInt(0, 2)); 
@@ -557,7 +561,7 @@ void GGL::Learner::Start() {
 				}
 			}
 
-			int numRealPlayers = oldVersion ? newPlayerIndices.size() : envSet->state.numPlayers;
+			int numRealPlayers = oldVersion ? (int)newPlayerIndices.size() : envSet->state.numPlayers;
 
 			int stepsCollected = 0;
 			{ // Generate experience
@@ -598,7 +602,7 @@ void GGL::Learner::Start() {
 							for (int i = 0; i < envSet->state.numPlayers; i++) {
 								for (int j = 0; j < obsSize; j++) {
 									float& obsVal = envSet->state.obs.At(i, j);
-									obsVal = (obsVal - mean[j]) / std[j];
+									obsVal = (float)((obsVal - mean[j]) / std[j]);
 								}
 							}
 						}
@@ -647,7 +651,7 @@ void GGL::Learner::Start() {
 							newLogProbs = TENSOR_TO_VEC<float>(tLogProbs);	
 
 						stepTimer.Reset();
-						envSet->Sync(); // Make sure the first half is done
+						envSet->Sync();
 						envSet->StepSecondHalf(curActions, false);
 						envStepTime += stepTimer.Elapsed();
 
@@ -655,19 +659,20 @@ void GGL::Learner::Start() {
 							stepCallback(this, envSet->state.gameStates, report);
 
 						if (render) {
-							renderSender->Send(envSet->state.gameStates[0]);
+							renderSender->Send(envSet->state.gameStates[0], envSet->rewards[0]);
+							if (saveQueued) break;
 							continue;
 						}
 
 						// Calc average rewards
 						if (config.addRewardsToMetrics && (Math::RandInt(0, config.rewardSampleRandInterval) == 0)) {
-							int numSamples = RS_MIN(envSet->arenas.size(), config.maxRewardSamples);
+							int numSamples = RS_MIN((int)envSet->arenas.size(), config.maxRewardSamples);
 							std::unordered_map<std::string, AvgTracker> avgRewards = {};
 							for (int i = 0; i < numSamples; i++) {
-								int arenaIdx = Math::RandInt(0, envSet->arenas.size());
+								int arenaIdx = Math::RandInt(0, (int)envSet->arenas.size());
 								auto& prevRewards = envSet->state.lastRewards[i];
 
-								for (int j = 0; j < envSet->rewards[arenaIdx].size(); j++) {
+								for (int j = 0; j < (int)envSet->rewards[arenaIdx].size(); j++) {
 									std::string rewardName = envSet->rewards[arenaIdx][j].reward->GetName();
 									avgRewards[rewardName] += prevRewards[j];
 								}
@@ -677,7 +682,6 @@ void GGL::Learner::Start() {
 								report.AddAvg("Rewards/" + pair.first, pair.second.Get());
 						}
 
-						// Now that we've inferred and stepped the env, we can add that stuff to the trajectories
 						int i = 0;
 						for (int newPlayerIdx : newPlayerIndices) {
 							trajectories[newPlayerIdx].actions.push_back(curActions[newPlayerIdx]);
@@ -687,35 +691,30 @@ void GGL::Learner::Start() {
 						}
 
 						auto curTerminals = std::vector<uint8_t>(numPlayers, 0);
-						for (int idx = 0; idx < envSet->arenas.size(); idx++) {
+						for (int idx = 0; idx < (int)envSet->arenas.size(); idx++) {
 							uint8_t terminalType = envSet->state.terminals[idx];
 							if (!terminalType)
 								continue;
 
 							auto playerStartIdx = envSet->state.arenaPlayerStartIdx[idx];
-							int playersInArena = envSet->state.gameStates[idx].players.size();
-							for (int i = 0; i < playersInArena; i++)
-								curTerminals[playerStartIdx + i] = terminalType;
+							int playersInArena = (int)envSet->state.gameStates[idx].players.size();
+							for (int k = 0; k < playersInArena; k++)
+								curTerminals[playerStartIdx + k] = terminalType;
 						}
 
 						for (int newPlayerIdx : newPlayerIndices) {
-							int8_t terminalType = curTerminals[newPlayerIdx];
+							int8_t terminalType = (int8_t)curTerminals[newPlayerIdx];
 							auto& traj = trajectories[newPlayerIdx];
 
-							if (!terminalType && traj.Length() >= maxEpisodeLength) {
-								// Episode is too long, truncate it here
-								// This won't actually reset the env, but rather will just add it to experience buffer as truncated
+							if (!terminalType && traj.Length() >= (size_t)maxEpisodeLength) {
 								terminalType = RLGC::TerminalType::TRUNCATED;
 							}
 
 							traj.terminals.push_back(terminalType);
 							if (terminalType) {
-
 								if (terminalType == RLGC::TerminalType::TRUNCATED) {
-									// Truncation requires an additional next state for the critic
 									traj.nextStates += envSet->state.obs.GetRow(newPlayerIdx);
 								}
-
 								combinedTraj.Append(traj);
 								traj.Clear();
 							}
@@ -731,7 +730,6 @@ void GGL::Learner::Start() {
 				{ // Process timesteps
 					RG_NO_GRAD;
 
-					// Make and transpose tensors
 					torch::Tensor tStates = torch::tensor(combinedTraj.states).reshape({ -1, obsSize });
 					torch::Tensor tActionMasks = torch::tensor(combinedTraj.actionMasks).reshape({ -1, numActions });
 					torch::Tensor tActions = torch::tensor(combinedTraj.actions);
@@ -739,7 +737,6 @@ void GGL::Learner::Start() {
 					torch::Tensor tRewards = torch::tensor(combinedTraj.rewards);
 					torch::Tensor tTerminals = torch::tensor(combinedTraj.terminals);
 
-					// States we truncated at (there could be none)
 					torch::Tensor tNextTruncStates;
 					if (!combinedTraj.nextStates.empty())
 						tNextTruncStates = torch::tensor(combinedTraj.nextStates).reshape({ -1, obsSize });
@@ -758,21 +755,18 @@ void GGL::Learner::Start() {
 					} else {
 						// Predict values using minibatching
 						tValPreds = torch::zeros({ (int64_t)combinedTraj.Length() });
-						for (int i = 0; i < combinedTraj.Length(); i += ppo->config.miniBatchSize) {
+						for (int i = 0; i < (int)combinedTraj.Length(); i += ppo->config.miniBatchSize) {
 							int start = i;
-							int end = RS_MIN(i + ppo->config.miniBatchSize, combinedTraj.Length());
+							int end = RS_MIN(i + ppo->config.miniBatchSize, (int)combinedTraj.Length());
 							torch::Tensor tStatesPart = tStates.slice(0, start, end);
 
 							auto valPredsPart = ppo->InferCritic(tStatesPart.to(ppo->device, true, true)).cpu();
-							RG_ASSERT(valPredsPart.size(0) == (end - start));
 							tValPreds.slice(0, start, end).copy_(valPredsPart, true);
 						}
 
 						if (tNextTruncStates.defined()) {
 							// This really just should never happen
 							// If this is ever actually a real problem in a legitimate use case, ping Zealan in the dead of night
-							RG_ASSERT(tNextTruncStates.size(0) <= ppo->config.miniBatchSize);
-
 							tTruncValPreds = ppo->InferCritic(tNextTruncStates.to(ppo->device, true, true)).cpu();
 						}
 					}
@@ -794,7 +788,7 @@ void GGL::Learner::Start() {
 					if (returnStat) {
 						report["GAE/Returns STD"] = returnStat->GetSTD();
 
-						int numToIncrement = RS_MIN(config.maxReturnSamples, tReturns.size(0));
+						int numToIncrement = RS_MIN(config.maxReturnSamples, (int)tReturns.size(0));
 						if (numToIncrement > 0) {
 							auto selectedReturns = tReturns.index_select(0, torch::randint(tReturns.size(0), { (int64_t)numToIncrement }));
 							returnStat->Increment(TENSOR_TO_VEC<float>(selectedReturns));
@@ -804,7 +798,6 @@ void GGL::Learner::Start() {
 					report["GAE/Avg Advantage"] = tAdvantages.abs().mean().item<float>();
 					report["GAE/Avg Val Target"] = tTargetVals.abs().mean().item<float>();
 
-					// Set experience buffer
 					experience.data.actions = tActions;
 					experience.data.logProbs = tLogProbs;
 					experience.data.actionMasks = tActionMasks;
@@ -813,18 +806,15 @@ void GGL::Learner::Start() {
 					experience.data.targetValues = tTargetVals;
 				}
 
-				// Free CUDA cache
 #ifdef RG_CUDA_SUPPORT
 				if (ppo->device.is_cuda())
 					c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
 
-				// Learn
 				Timer learnTimer = {};
 				ppo->Learn(experience, report, isFirstIteration);
 				report["PPO Learn Time"] = learnTimer.Elapsed();
 
-				// Set metrics
 				float consumptionTime = consumptionTimer.Elapsed();
 				report["Collection Time"] = collectionTime;
 				report["Consumption Time"] = consumptionTime;
@@ -842,14 +832,13 @@ void GGL::Learner::Start() {
 					versionMgr->OnIteration(ppo, report, totalTimesteps, prevTimesteps);
 
 				if (saveQueued) {
-					if (!config.checkpointFolder.empty())
+					if (!config.checkpointFolder.empty() && !config.renderMode)
 						Save();
 					exit(0);
 				}
 
 				if (!config.checkpointFolder.empty()) {
 					if (totalTimesteps / config.tsPerSave > prevTimesteps / config.tsPerSave) {
-						// Auto-save
 						Save();
 					}
 				}
@@ -888,6 +877,8 @@ void GGL::Learner::Start() {
 				);
 			}
 		}
+
+		RG_LOG("Learner: Timestep limit of " << config.timestepLimit << " reached, stopping");
 		
 	} catch (std::exception& e) {
 		RG_ERR_CLOSE("Exception thrown during main learner loop: " << e.what());

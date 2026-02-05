@@ -34,6 +34,9 @@ namespace GGL {
 		// Set to zero to just use timestepsPerIteration
 		int64_t tsPerSave = 1'000'000;
 
+		// Set to 0 to disable
+		int64_t timestepLimit = 0;
+
 		int64_t randomSeed = -1; // Set to -1 to use the current time
 		int checkpointsToKeep = 8; // Checkpoint storage limit before old checkpoints are deleted, set to -1 to disable
 		LearnerDeviceType deviceType = LearnerDeviceType::AUTO; // Auto will use your CUDA GPU if available
