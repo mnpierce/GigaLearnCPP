@@ -172,8 +172,10 @@ void GGL::Learner::SaveStats(std::filesystem::path path) {
 	j["total_timesteps"] = totalTimesteps;
 	j["total_iterations"] = totalIterations;
 
-	if (config.sendMetrics && metricSender)
+	if (config.sendMetrics && metricSender) {
 		j["run_id"] = metricSender->curRunID;
+		j["run_name"] = config.metricsRunName;
+	}
 
 	if (returnStat)
 		j["return_stat"] = returnStat->ToJSON();
@@ -201,8 +203,14 @@ void GGL::Learner::LoadStats(std::filesystem::path path) {
 	totalTimesteps = j.value("total_timesteps", (uint64_t)0);
 	totalIterations = j.value("total_iterations", (uint64_t)0);
 
-	if (j.contains("run_id"))
-		runID = j["run_id"];
+	if (j.contains("run_id")) {
+		if (j.value("run_name", "") == config.metricsRunName) {
+			runID = j["run_id"];
+		} else {
+			RG_LOG("Notice: Saved run_name (" << j.value("run_name", "") << ") differs from current metricsRunName (" << config.metricsRunName << "). Starting a new wandb run instead of resuming.");
+			runID = "";
+		}
+	}
 
 	if (returnStat && j.contains("return_stat"))
 		returnStat->ReadFromJSON(j["return_stat"]);
@@ -276,20 +284,43 @@ void GGL::Learner::Load() {
 void GGL::Learner::StartQuitKeyThread(bool& quitPressed, std::thread& outThread) {
 	quitPressed = false;
 
-	RG_LOG("Press 'Q' to save and quit!");
+	RG_LOG("Press 'Q' to save and quit! (Or create 'stop_gigalearn.txt' in the working directory)");
 	outThread = std::thread(
 		[&] {
-			while (true) {
+			while (!quitPressed) { // Stop thread if already queued
+				// Check for manual Q press (This is a blocking call!)
 				char c = toupper(KeyPressDetector::GetPressedChar());
 				if (c == 'Q') {
-					RG_LOG("Save queued, will save and exit next iteration.");
+					RG_LOG("Save queued by user (Q pressed). Will save and exit next iteration.");
 					quitPressed = true;
+					break;
 				}
 			}
 		}
 	);
 
 	outThread.detach();
+
+	// Spawn a separate non-blocking thread to watch for the stop file
+	std::thread fileCheckThread(
+		[&] {
+			while (!quitPressed) {
+				// Check for automated stop file
+				if (std::filesystem::exists("stop_gigalearn.txt")) {
+					RG_LOG("Automated stop file detected. Will save and exit next iteration.");
+					try {
+						std::filesystem::remove("stop_gigalearn.txt");
+					} catch (...) {} // Ignore if we can't delete it
+					quitPressed = true;
+					break;
+				}
+
+				std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Prevent CPU spam
+			}
+		}
+	);
+
+	fileCheckThread.detach();
 }
 void GGL::Learner::StartTransferLearn(const TransferLearnConfig& tlConfig) {
 
