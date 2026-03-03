@@ -181,29 +181,37 @@ public:
         kickoffActive = true;
     }
 
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        if (!kickoffActive) return 0.0f;
+    virtual std::vector<float> GetAllRewards(const GameState& state, bool isFinal) override {
+        std::vector<float> rewards(state.players.size(), 0.0f);
+        if (!kickoffActive) return rewards;
+
+        bool touched = false;
+        for (size_t i = 0; i < state.players.size(); ++i) {
+            const Player& player = state.players[i];
+            if (player.ballTouchedStep) {
+                touched = true;
+                float goalDirY = (player.team == Team::BLUE) ? 1.0f : -1.0f;
+                float ballVelY = state.ball.vel.y * goalDirY;
+                float ratio = ballVelY / 2000.0f;
+                
+                if (ratio > 0.5f) ratio = 0.5f;
+                if (ratio < -0.5f) ratio = -0.5f;
+
+                rewards[i] = 0.5f + ratio;
+            }
+        }
 
         float ballPosXY = std::sqrt(state.ball.pos.x * state.ball.pos.x + state.ball.pos.y * state.ball.pos.y);
         float ballSpeed = state.ball.vel.Length();
-        
-        if ((ballPosXY > 200.0f || ballSpeed > 500.0f) && !player.ballTouchedStep) {
+
+        if (touched || ballPosXY > 200.0f || ballSpeed > 500.0f) {
             kickoffActive = false;
-            return 0.0f;
-        }
-        
-        if (player.ballTouchedStep) {
-            float goalDirY = (player.team == Team::BLUE) ? 1.0f : -1.0f;
-            float ballVelY = state.ball.vel.y * goalDirY;
-            float ratio = ballVelY / 2000.0f;
-            
-            if (ratio > 0.5f) ratio = 0.5f;
-            if (ratio < -0.5f) ratio = -0.5f;
-
-            kickoffActive = false; 
-            return 0.5f + ratio;
         }
 
-        return 0.0f;
+        return rewards;
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        return 0.0f; // Logic handled in GetAllRewards
     }
 };
