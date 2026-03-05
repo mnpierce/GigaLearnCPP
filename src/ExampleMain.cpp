@@ -131,10 +131,32 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 	// To prevent expensive metrics from eating at performance, we will only run them on 1/4th of steps
 	bool doExpensiveMetrics = (rand() % 4) == 0;
 
+	// Persistence for mechanics metrics
+	// Indexing: [game_idx][player_idx]
+	static std::vector<std::vector<uint64_t>> lastTouchTicks;
+	static std::vector<std::vector<Vec>> lastBallVels;
+
+	if (lastTouchTicks.empty() && !states.empty()) {
+		lastTouchTicks.resize(states.size(), std::vector<uint64_t>(states[0].players.size(), 0));
+		lastBallVels.resize(states.size(), std::vector<Vec>(states[0].players.size(), Vec()));
+	}
+
 	// Add our metrics
-	for (auto& state : states) {
-		if (doExpensiveMetrics) {
-			for (auto& player : state.players) {
+	for (int g = 0; g < states.size(); g++) {
+		auto& state = states[g];
+		
+		// --- Reward Ratio Analysis ---
+		// We can get individual weighted rewards from the learner if we had access to the EnvSet
+		// But since we are in StepCallback, it's easier to just poll the report later or 
+		// calculate it here if we have the weights.
+		// Since weights are static in ExampleMain, we can manually compute the ratio.
+		float totalWeightedReward = 0;
+		float touchWeightedReward = 0;
+
+		for (int p = 0; p < state.players.size(); p++) {
+			auto& player = state.players[p];
+
+			if (doExpensiveMetrics) {
 				report.AddAvg("Player/In Air Ratio", !player.isOnGround);
 				report.AddAvg("Player/Ball Touch Ratio", player.ballTouchedStep);
 				report.AddAvg("Player/Demoed Ratio", player.isDemoed);
@@ -153,12 +175,47 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 				if (player.ballTouchedStep)
 					report.AddAvg("Player/Touch Height", state.ball.pos.z);
 			}
+
+			// --- New Transition Logic Mechanics ---
+			if (player.ballTouchedStep) {
+				// 1. Ball Speed Change (Impact)
+				Vec curBallVel = state.ball.vel;
+				Vec prevBallVel = lastBallVels[g][p];
+				float speedChange = (curBallVel - prevBallVel).Length();
+				report.AddAvg("Mechanics/Ball Speed Change on Touch", speedChange);
+
+				// 2. Time Between Touches (Temporal)
+				uint64_t curTick = state.lastTickCount;
+				uint64_t prevTick = lastTouchTicks[g][p];
+				if (prevTick > 0) {
+					uint64_t diff = curTick - prevTick;
+					report.AddAvg("Mechanics/Time Between Touches", (float)diff);
+				}
+
+				lastTouchTicks[g][p] = curTick;
+			}
+
+			lastBallVels[g][p] = state.ball.vel;
 		}
 
 		if (state.goalScored) {
 			report.AddAvg("Game/Goal Speed", state.ball.vel.Length());
 			report.Add("Game/Total Goals", 1.0f);
 		}
+	}
+
+	// Reward Ratio Logic (Alternative approach: Use the data already in the report)
+	// The Learner automatically adds "Rewards/TouchReward" etc. to the report.
+	// We can use those values to compute the ratio for WandB.
+	float touchRewardVal = report.GetAvg("Rewards/TouchReward");
+	float advTouchRewardVal = report.GetAvg("Rewards/AdvancedTouchReward");
+	
+	// Total reward is reported as "Policy Reward" by PPOLearner
+	float totalReward = report.GetAvg("Policy Reward");
+	
+	if (totalReward > 0) {
+		float touchRatio = (touchRewardVal + advTouchRewardVal) / totalReward;
+		report.AddAvg("Reward/Touch Ratio", touchRatio);
 	}
 }
 

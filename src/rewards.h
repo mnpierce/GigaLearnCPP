@@ -16,6 +16,7 @@ using namespace RLGC;
 
 class SpeedTowardBallReward : public Reward {
 public:
+    virtual std::string GetName() override { return "SpeedTowardBallReward"; }
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         Vec posDiff = state.ball.pos - player.pos;
         float distToBall = posDiff.Length();
@@ -36,6 +37,7 @@ class JumpTouchReward : public Reward {
     std::map<int, int> timers;
 
 public:
+    virtual std::string GetName() override { return "JumpTouchReward"; }
     JumpTouchReward(float minHeight = 120.f, float exp = 0.5f, int cooldown = 30)
         : minHeight(minHeight), exp(exp), cooldown(cooldown) {}
 
@@ -63,6 +65,7 @@ public:
 
 class InAirReward : public Reward {
 public:
+    virtual std::string GetName() override { return "InAirReward"; }
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         return player.isOnGround ? 0.0f : 1.0f;
     }
@@ -70,6 +73,7 @@ public:
 
 class TouchReward : public Reward {
 public:
+    virtual std::string GetName() override { return "TouchReward"; }
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         return player.ballTouchedStep ? 1.0f : 0.0f;
     }
@@ -77,6 +81,7 @@ public:
 
 class CustomFaceBallReward : public Reward {
 public:
+    virtual std::string GetName() override { return "CustomFaceBallReward"; }
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         Vec posDiff = state.ball.pos - player.pos;
         float dist = posDiff.Length();
@@ -92,6 +97,7 @@ public:
 
 class CustomVelocityBallToGoalReward : public Reward {
 public:
+    virtual std::string GetName() override { return "CustomVelocityBallToGoalReward"; }
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         float targetY = (player.team == Team::BLUE) ? CommonValues::BACK_NET_Y : -CommonValues::BACK_NET_Y;
         Vec targetPos = Vec(0, targetY, 0); 
@@ -118,6 +124,7 @@ class AdvancedTouchReward : public Reward {
     uint64_t lastTick; 
 
 public:
+    virtual std::string GetName() override { return "AdvancedTouchReward"; }
     AdvancedTouchReward(float touchReward = 1.0f, float accelReward = 0.0f, float minBallSpeed = 0.0f)
         : touchReward(touchReward), accelReward(accelReward), minBallSpeed(minBallSpeed), lastTick(0) {}
 
@@ -136,11 +143,12 @@ public:
 
         float reward = 0.0f;
         if (player.ballTouchedStep) {
-            Vec velDiff = currentBallVel - prevBallVel;
-            float acceleration = velDiff.Length() / CommonValues::BALL_MAX_SPEED;
-            reward += acceleration * accelReward;
-
+            // Only reward the touch IF the ball is moving fast enough
             if (currentBallVel.Length() >= minBallSpeed) {
+                Vec velDiff = currentBallVel - prevBallVel;
+                float acceleration = velDiff.Length() / CommonValues::BALL_MAX_SPEED;
+                
+                reward += acceleration * accelReward;
                 reward += touchReward;
             }
         }
@@ -151,6 +159,7 @@ public:
 
 class KickoffReward : public Reward {
 public:
+    virtual std::string GetName() override { return "KickoffReward"; }
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         float ballPosXY = std::sqrt(state.ball.pos.x * state.ball.pos.x + state.ball.pos.y * state.ball.pos.y);
         float ballSpeed = state.ball.vel.Length();
@@ -175,6 +184,7 @@ class FirstTouchKickoffReward : public Reward {
     bool kickoffActive;
 
 public:
+    virtual std::string GetName() override { return "FirstTouchKickoffReward"; }
     FirstTouchKickoffReward() : kickoffActive(true) {}
 
     virtual void Reset(const GameState& state) override {
