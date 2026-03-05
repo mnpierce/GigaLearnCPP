@@ -12,6 +12,7 @@
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 
 #include "rewards.h"
+#include "GoalieState.h"
 #include <iostream>
 #include <string>
 
@@ -53,21 +54,20 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
 		rewards.push_back(WeightedReward(new KickoffReward(), 20.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 500.0f));
-		rewards.push_back(WeightedReward(new WavedashReward(), 10.0f));
+		// WavedashReward removed due to exploiting normal flips
 	} else { // MASTER
 		// Core scoring and defense (Zero-sum scales down slightly to balance with resource rewards)
 		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1200.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 20.0f));
 		
 		// Refined mechanics & Kickoffs
-		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
+		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f)); 
 		rewards.push_back(WeightedReward(new JumpTouchReward(), 150.0f)); 
 		rewards.push_back(WeightedReward(new KickoffReward(), 20.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 400.0f));
-		rewards.push_back(WeightedReward(new WavedashReward(), 10.0f));
+		// WavedashReward removed due to exploiting normal flips
 		
 		// Resource Management & Strategy
-		rewards.push_back(WeightedReward(new SaveBoostReward(), 2.0f)); // Stop wasting boost
 		rewards.push_back(WeightedReward(new PickupBoostReward(), 10.0f)); // Path over pads
 		rewards.push_back(WeightedReward(new DemoReward(), 50.0f)); // Encourage physical disruption
 	}
@@ -93,19 +93,22 @@ EnvCreateResult EnvCreateFunc(int index) {
 		result.stateSetter = new RandomState(true, true, false); 
 	} else if (CURRENT_STAGE == TrainingStage::MID) {
 		result.stateSetter = new CombinedState({
-			{new RandomState(true, true, false), 1.0f},
-			{new KickoffState(), 1.0f}
+			{new RandomState(true, true, false), 0.4f},
+			{new KickoffState(), 0.4f},
+			{new GoalieState(), 0.2f}
 		});
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		result.stateSetter = new CombinedState({
-			{new RandomState(true, true, false), 0.2f},
-			{new KickoffState(), 0.8f}
+			{new RandomState(true, true, false), 0.15f},
+			{new KickoffState(), 0.7f},
+			{new GoalieState(), 0.15f}
 		});
 	} else { // MASTER
 		// In high level 1v1, kickoffs are critical, but so is awkward field positioning.
 		result.stateSetter = new CombinedState({
-			{new RandomState(true, true, false), 0.3f}, // Slightly higher random to test defense
-			{new KickoffState(), 0.7f}
+			{new RandomState(true, true, false), 0.2f}, // Slightly higher random to test defense
+			{new KickoffState(), 0.6f},
+			{new GoalieState(), 0.2f}
 		});
 	}
 
