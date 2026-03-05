@@ -37,9 +37,12 @@ EnvCreateResult EnvCreateFunc(int index) {
 
 	if (CURRENT_STAGE == TrainingStage::EARLY) {
 		rewards.push_back(WeightedReward(new InAirReward(), 0.15f));
-		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
-		rewards.push_back(WeightedReward(new CustomFaceBallReward(), 0.5f));
+		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 6.0f));
+		rewards.push_back(WeightedReward(new CustomFaceBallReward(), 1.0f));
 		rewards.push_back(WeightedReward(new TouchReward(), 50.0f));
+		// Small goal orientation even in early to prevent circular driving
+		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 2.0f));
+		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 100.0f));
 	} else if (CURRENT_STAGE == TrainingStage::MID) {
 		rewards.push_back(WeightedReward(new InAirReward(), 0.15f));
 		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
@@ -126,7 +129,6 @@ EnvCreateResult EnvCreateFunc(int index) {
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
 	// To prevent expensive metrics from eating at performance, we will only run them on 1/4th of steps
-	// This doesn't really matter unless you have expensive metrics (which this example doesn't)
 	bool doExpensiveMetrics = (rand() % 4) == 0;
 
 	// Add our metrics
@@ -136,6 +138,11 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 				report.AddAvg("Player/In Air Ratio", !player.isOnGround);
 				report.AddAvg("Player/Ball Touch Ratio", player.ballTouchedStep);
 				report.AddAvg("Player/Demoed Ratio", player.isDemoed);
+				
+				// --- Baseline Mechanics Trackers ---
+				report.AddAvg("Mechanics/Jumping Ratio", player.isJumping);
+				report.AddAvg("Mechanics/Flipping Ratio", player.isFlipping);
+				report.AddAvg("Mechanics/Supersonic Ratio", player.isSupersonic);
 
 				report.AddAvg("Player/Speed", player.vel.Length());
 				Vec dirToBall = (state.ball.pos - player.pos).Normalized();
@@ -148,8 +155,10 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 			}
 		}
 
-		if (state.goalScored)
+		if (state.goalScored) {
 			report.AddAvg("Game/Goal Speed", state.ball.vel.Length());
+			report.Add("Game/Total Goals", 1.0f);
+		}
 	}
 }
 
