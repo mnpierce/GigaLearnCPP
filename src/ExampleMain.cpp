@@ -136,25 +136,18 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 	static std::vector<std::vector<uint64_t>> lastTouchTicks;
 	static std::vector<std::vector<Vec>> lastBallVels;
 
-	if (lastTouchTicks.empty() && !states.empty()) {
-		lastTouchTicks.resize(states.size(), std::vector<uint64_t>(states[0].players.size(), 0));
-		lastBallVels.resize(states.size(), std::vector<Vec>(states[0].players.size(), Vec()));
+	if (lastTouchTicks.size() != states.size() || (!states.empty() && lastTouchTicks[0].size() != states[0].players.size())) {
+		lastTouchTicks.assign(states.size(), std::vector<uint64_t>(states[0].players.size(), 0));
+		lastBallVels.assign(states.size(), std::vector<Vec>(states[0].players.size(), Vec()));
 	}
 
 	// Add our metrics
 	for (int g = 0; g < states.size(); g++) {
 		auto& state = states[g];
-		
-		// --- Reward Ratio Analysis ---
-		// We can get individual weighted rewards from the learner if we had access to the EnvSet
-		// But since we are in StepCallback, it's easier to just poll the report later or 
-		// calculate it here if we have the weights.
-		// Since weights are static in ExampleMain, we can manually compute the ratio.
-		float totalWeightedReward = 0;
-		float touchWeightedReward = 0;
 
 		for (int p = 0; p < state.players.size(); p++) {
 			auto& player = state.players[p];
+
 
 			if (doExpensiveMetrics) {
 				report.AddAvg("Player/In Air Ratio", !player.isOnGround);
