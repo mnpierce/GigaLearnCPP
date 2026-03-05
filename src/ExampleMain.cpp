@@ -196,20 +196,6 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 			report.Add("Game/Total Goals", 1.0f);
 		}
 	}
-
-	// Reward Ratio Logic (Alternative approach: Use the data already in the report)
-	// The Learner automatically adds "Rewards/TouchReward" etc. to the report.
-	// We can use those values to compute the ratio for WandB.
-	float touchRewardVal = report.GetAvg("Rewards/TouchReward");
-	float advTouchRewardVal = report.GetAvg("Rewards/AdvancedTouchReward");
-	
-	// Total reward is reported as "Policy Reward" by PPOLearner
-	float totalReward = report.GetAvg("Policy Reward");
-	
-	if (totalReward > 0) {
-		float touchRatio = (touchRewardVal + advTouchRewardVal) / totalReward;
-		report.AddAvg("Reward/Touch Ratio", touchRatio);
-	}
 }
 
 int main(int argc, char* argv[]) {
