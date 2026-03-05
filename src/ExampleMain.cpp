@@ -13,6 +13,7 @@
 
 #include "rewards.h"
 #include "GoalieState.h"
+#include "ShadowDefenseState.h"
 #include <iostream>
 #include <string>
 
@@ -95,20 +96,23 @@ EnvCreateResult EnvCreateFunc(int index) {
 		result.stateSetter = new CombinedState({
 			{new RandomState(true, true, false), 0.4f},
 			{new KickoffState(), 0.4f},
-			{new GoalieState(), 0.2f}
+			{new GoalieState(), 0.1f},
+			{new ShadowDefenseState(), 0.1f}
 		});
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		result.stateSetter = new CombinedState({
 			{new RandomState(true, true, false), 0.15f},
-			{new KickoffState(), 0.7f},
-			{new GoalieState(), 0.15f}
+			{new KickoffState(), 0.65f},
+			{new GoalieState(), 0.1f},
+			{new ShadowDefenseState(), 0.1f}
 		});
 	} else { // MASTER
 		// In high level 1v1, kickoffs are critical, but so is awkward field positioning.
 		result.stateSetter = new CombinedState({
 			{new RandomState(true, true, false), 0.2f}, // Slightly higher random to test defense
-			{new KickoffState(), 0.6f},
-			{new GoalieState(), 0.2f}
+			{new KickoffState(), 0.5f},
+			{new GoalieState(), 0.15f},
+			{new ShadowDefenseState(), 0.15f}
 		});
 	}
 
