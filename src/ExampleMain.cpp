@@ -14,6 +14,8 @@
 #include "rewards.h"
 #include "GoalieState.h"
 #include "ShadowDefenseState.h"
+#include "RLBotClient.h"
+#include <GigaLearnCPP/Util/InferUnit.h>
 #include <iostream>
 #include <string>
 
@@ -24,12 +26,36 @@ using namespace RLGC; // RLGymCPP
 enum TrainingStage {
 	EARLY,  // 0-100M steps: Learn to touch ball
 	MID,    // 100M-1B steps: Learn to score
+	KICKOFF, // First-touch speedflip arms race
 	LATE,   // 1B-5B steps: Advanced mechanics & kickoffs
-	MASTER  // 5B+ steps: Boost management, defense, and strategy
+	MASTER, // 5B+ steps: Boost management, defense, and strategy
+	TEST_GOALIE,  // Visual test mode for goalie state
+	TEST_SHADOW   // Visual test mode for shadow state
 };
 
 // ** CHANGE THIS TO SWITCH STAGES **
 TrainingStage CURRENT_STAGE;
+
+class TimeoutCondition : public RLGC::TerminalCondition {
+private:
+	uint64_t startTickCount;
+	float timeoutSeconds;
+
+public:
+	TimeoutCondition(float seconds) : timeoutSeconds(seconds), startTickCount(0) {}
+
+	virtual void Reset(const RLGC::GameState& initialState) override {
+		startTickCount = initialState.lastTickCount;
+	}
+
+	virtual bool IsTerminal(const RLGC::GameState& currentState) override {
+		uint64_t elapsedTicks = currentState.lastTickCount - startTickCount;
+		float elapsedSeconds = elapsedTicks / 120.0f; // Rocket League runs at 120 ticks per second
+		return elapsedSeconds >= timeoutSeconds;
+	}
+
+	virtual bool IsTruncation() override { return true; }
+};
 
 // Create the RLGymCPP environment for each of our games
 EnvCreateResult EnvCreateFunc(int index) {
@@ -50,6 +76,12 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 10.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1000.0f));
 		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
+	} else if (CURRENT_STAGE == TrainingStage::KICKOFF) {
+		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
+		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 10.0f));
+		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1000.0f));
+		rewards.push_back(WeightedReward(new KickoffReward(), 20.0f));
+		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 800.0f));
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
 		rewards.push_back(WeightedReward(new JumpTouchReward(), 200.0f));
@@ -76,10 +108,19 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new DemoReward(), 50.0f)); // Encourage physical disruption
 	}
 
-	std::vector<TerminalCondition*> terminalConditions = {
-		new NoTouchCondition(10), // 10 seconds
-		new GoalScoreCondition()
-	};
+	std::vector<TerminalCondition*> terminalConditions;
+	
+	if (CURRENT_STAGE == TrainingStage::TEST_GOALIE || CURRENT_STAGE == TrainingStage::TEST_SHADOW) {
+		terminalConditions = {
+			new NoTouchCondition(3), // Just 3 seconds to reset quickly during visual tests
+			new GoalScoreCondition()
+		};
+	} else {
+		terminalConditions = {
+			new NoTouchCondition(10), // 10 seconds
+			new GoalScoreCondition()
+		};
+	}
 
 	// Make the arena
 	int playersPerTeam = 1;
@@ -102,6 +143,11 @@ EnvCreateResult EnvCreateFunc(int index) {
 			{new GoalieState(), 0.1f},
 			{new ShadowDefenseState(), 0.1f}
 		});
+	} else if (CURRENT_STAGE == TrainingStage::KICKOFF) {
+		result.stateSetter = new CombinedState({
+			{new RandomState(true, true, false), 0.15f},
+			{new KickoffState(), 0.85f}
+		});
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		result.stateSetter = new CombinedState({
 			{new RandomState(true, true, false), 0.15f},
@@ -109,6 +155,10 @@ EnvCreateResult EnvCreateFunc(int index) {
 			{new GoalieState(), 0.1f},
 			{new ShadowDefenseState(), 0.1f}
 		});
+	} else if (CURRENT_STAGE == TrainingStage::TEST_GOALIE) {
+		result.stateSetter = new GoalieState();
+	} else if (CURRENT_STAGE == TrainingStage::TEST_SHADOW) {
+		result.stateSetter = new ShadowDefenseState();
 	} else { // MASTER
 		// In high level 1v1, kickoffs are critical, but so is awkward field positioning.
 		result.stateSetter = new CombinedState({
@@ -128,18 +178,25 @@ EnvCreateResult EnvCreateFunc(int index) {
 }
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
+	// --- DEBUG OUTPUT FOR SYNC CHECK ---
+	static int stepCount = 0;
+	if (stepCount % 15 == 0) { // 15 steps * 8 tick skip = 120 ticks (~1 second)
+		auto& state = states[0];
+		if (!state.players.empty()) {
+			auto& player = state.players[0];
+			std::cout << "[C++ Sync-Check] Step: " << stepCount << " | Pos: " 
+					  << std::fixed << std::setprecision(0) << player.pos.x << ", " 
+					  << player.pos.y << ", " << player.pos.z 
+					  << " | Prev Action Array: [ ";
+			for(int i=0; i<8; i++) std::cout << player.prevAction[i] << " ";
+			std::cout << "]" << std::endl;
+		}
+	}
+	stepCount++;
+	// -----------------------------------
+
 	// To prevent expensive metrics from eating at performance, we will only run them on 1/4th of steps
 	bool doExpensiveMetrics = (rand() % 4) == 0;
-
-	// Persistence for mechanics metrics
-	// Indexing: [game_idx][player_idx]
-	static std::vector<std::vector<uint64_t>> lastTouchTicks;
-	static std::vector<std::vector<Vec>> lastBallVels;
-
-	if (lastTouchTicks.size() != states.size() || (!states.empty() && lastTouchTicks[0].size() != states[0].players.size())) {
-		lastTouchTicks.assign(states.size(), std::vector<uint64_t>(states[0].players.size(), 0));
-		lastBallVels.assign(states.size(), std::vector<Vec>(states[0].players.size(), Vec()));
-	}
 
 	// Add our metrics
 	for (int g = 0; g < states.size(); g++) {
@@ -168,27 +225,6 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
 				if (player.ballTouchedStep)
 					report.AddAvg("Player/Touch Height", state.ball.pos.z);
 			}
-
-			// --- New Transition Logic Mechanics ---
-			if (player.ballTouchedStep) {
-				// 1. Ball Speed Change (Impact)
-				Vec curBallVel = state.ball.vel;
-				Vec prevBallVel = lastBallVels[g][p];
-				float speedChange = (curBallVel - prevBallVel).Length();
-				report.AddAvg("Mechanics/Ball Speed Change on Touch", speedChange);
-
-				// 2. Time Between Touches (Temporal)
-				uint64_t curTick = state.lastTickCount;
-				uint64_t prevTick = lastTouchTicks[g][p];
-				if (prevTick > 0) {
-					uint64_t diff = curTick - prevTick;
-					report.AddAvg("Mechanics/Time Between Touches", (float)diff);
-				}
-
-				lastTouchTicks[g][p] = curTick;
-			}
-
-			lastBallVels[g][p] = state.ball.vel;
 		}
 
 		if (state.goalScored) {
@@ -215,17 +251,30 @@ int main(int argc, char* argv[]) {
 		} else if (arg == "--stage=mid") {
 			CURRENT_STAGE = TrainingStage::MID;
 			stageSet = true;
+		} else if (arg == "--stage=kickoff") {
+			CURRENT_STAGE = TrainingStage::KICKOFF;
+			stageSet = true;
 		} else if (arg == "--stage=late") {
 			CURRENT_STAGE = TrainingStage::LATE;
 			stageSet = true;
 		} else if (arg == "--stage=master") {
 			CURRENT_STAGE = TrainingStage::MASTER;
 			stageSet = true;
+		} else if (arg == "--test-state=goalie") {
+			CURRENT_STAGE = TrainingStage::TEST_GOALIE;
+			stageSet = true;
+			render = true;
+			metrics = false;
+		} else if (arg == "--test-state=shadow") {
+			CURRENT_STAGE = TrainingStage::TEST_SHADOW;
+			stageSet = true;
+			render = true;
+			metrics = false;
 		}
 	}
 
 	if (!stageSet) {
-		std::cerr << "Error: Mandatory argument --stage=[early|mid|late|master] is missing or invalid." << std::endl;
+		std::cerr << "Error: Mandatory argument --stage=[early|mid|kickoff|late|master] or --test-state=[goalie|shadow] is missing or invalid." << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -284,8 +333,8 @@ int main(int argc, char* argv[]) {
 	if (CURRENT_STAGE == EARLY) {
 		cfg.checkpointFolder = "checkpoints/early";
 		cfg.metricsRunName = "early";
-		cfg.tsPerVersion = 10'000'000;        // Save a new version every 25M steps
-		cfg.tsPerSave = 50'000'000;
+		cfg.tsPerVersion = 5'000'000;        // Save a new version every 25M steps
+		cfg.tsPerSave = 10'000'000;
 		// cfg.timestepLimit = 50'000'000; // Handled by auto_train.py
 		cfg.ppo.tsPerItr = 50000;
 		cfg.ppo.batchSize = 50000;
@@ -307,6 +356,18 @@ int main(int argc, char* argv[]) {
 		cfg.ppo.criticLR = 1.5e-4;
 		cfg.ppo.gaeGamma = 0.993f;
 		cfg.ppo.entropyScale = 0.0225f;
+	} else if (CURRENT_STAGE == KICKOFF) {
+		cfg.checkpointFolder = "checkpoints/kickoff";
+		cfg.metricsRunName = "kickoff";
+		cfg.tsPerVersion = 50'000'000;
+		cfg.tsPerSave = 100'000'000;
+		cfg.ppo.tsPerItr = 150000;
+		cfg.ppo.batchSize = 150000;
+		cfg.ppo.miniBatchSize = 37500;
+		cfg.ppo.policyLR = 1.3e-4;
+		cfg.ppo.criticLR = 1.3e-4;
+		cfg.ppo.gaeGamma = 0.994f;
+		cfg.ppo.entropyScale = 0.015f;
 	} else if (CURRENT_STAGE == LATE) {
 		cfg.checkpointFolder = "checkpoints/late";
 		cfg.metricsRunName = "late";
@@ -320,6 +381,14 @@ int main(int argc, char* argv[]) {
 		cfg.ppo.criticLR = 1.2e-4;
 		cfg.ppo.gaeGamma = 0.995f;
 		cfg.ppo.entropyScale = 0.01f;
+	} else if (CURRENT_STAGE == TEST_GOALIE || CURRENT_STAGE == TEST_SHADOW) {
+		cfg.checkpointFolder = "checkpoints/mid"; // Load from mid for testing
+		cfg.metricsRunName = "test";
+		cfg.tsPerVersion = 100'000'000;
+		cfg.tsPerSave = 500'000'000;
+		cfg.ppo.tsPerItr = 100'000;
+		cfg.ppo.batchSize = 100'000;
+		cfg.ppo.miniBatchSize = 25'000;
 	} else { // MASTER
 		cfg.checkpointFolder = "checkpoints/master";
 		cfg.metricsRunName = "master";
