@@ -14,6 +14,8 @@
 #include "rewards.h"
 #include "GoalieState.h"
 #include "ShadowDefenseState.h"
+#include "DribbleState.h"
+#include "AerialState.h"
 #include "RLBotClient.h"
 #include <GigaLearnCPP/Util/InferUnit.h>
 #include <iostream>
@@ -30,7 +32,9 @@ enum TrainingStage {
 	LATE,   // 1B-5B steps: Advanced mechanics & kickoffs
 	MASTER, // 5B+ steps: Boost management, defense, and strategy
 	TEST_GOALIE,  // Visual test mode for goalie state
-	TEST_SHADOW   // Visual test mode for shadow state
+	TEST_SHADOW,  // Visual test mode for shadow state
+	TEST_DRIBBLE, // Visual test mode for dribble state
+	TEST_AERIAL   // Visual test mode for aerial state
 };
 
 // ** CHANGE THIS TO SWITCH STAGES **
@@ -110,7 +114,12 @@ EnvCreateResult EnvCreateFunc(int index) {
 
 	std::vector<TerminalCondition*> terminalConditions;
 	
-	if (CURRENT_STAGE == TrainingStage::TEST_GOALIE || CURRENT_STAGE == TrainingStage::TEST_SHADOW) {
+	if (CURRENT_STAGE == TrainingStage::TEST_DRIBBLE || CURRENT_STAGE == TrainingStage::TEST_AERIAL) {
+		terminalConditions = {
+			new TimeoutCondition(5.0f), // Hard 5-second timeout to cycle through variations quickly
+			new GoalScoreCondition()
+		};
+	} else if (CURRENT_STAGE == TrainingStage::TEST_GOALIE || CURRENT_STAGE == TrainingStage::TEST_SHADOW) {
 		terminalConditions = {
 			new NoTouchCondition(3), // Just 3 seconds to reset quickly during visual tests
 			new GoalScoreCondition()
@@ -150,22 +159,30 @@ EnvCreateResult EnvCreateFunc(int index) {
 		});
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		result.stateSetter = new CombinedState({
-			{new RandomState(true, true, false), 0.15f},
-			{new KickoffState(), 0.65f},
-			{new GoalieState(), 0.1f},
-			{new ShadowDefenseState(), 0.1f}
+			{new RandomState(true, true, false), 0.05f},
+			{new KickoffState(), 0.55f},
+			{new GoalieState(), 0.10f},
+			{new ShadowDefenseState(), 0.10f},
+			{new DribbleState(), 0.10f},
+			{new AerialState(), 0.10f}
 		});
 	} else if (CURRENT_STAGE == TrainingStage::TEST_GOALIE) {
 		result.stateSetter = new GoalieState();
 	} else if (CURRENT_STAGE == TrainingStage::TEST_SHADOW) {
 		result.stateSetter = new ShadowDefenseState();
+	} else if (CURRENT_STAGE == TrainingStage::TEST_DRIBBLE) {
+		result.stateSetter = new DribbleState();
+	} else if (CURRENT_STAGE == TrainingStage::TEST_AERIAL) {
+		result.stateSetter = new AerialState();
 	} else { // MASTER
 		// In high level 1v1, kickoffs are critical, but so is awkward field positioning.
 		result.stateSetter = new CombinedState({
-			{new RandomState(true, true, false), 0.2f}, // Slightly higher random to test defense
-			{new KickoffState(), 0.5f},
-			{new GoalieState(), 0.15f},
-			{new ShadowDefenseState(), 0.15f}
+			{new RandomState(true, true, false), 0.10f},
+			{new KickoffState(), 0.40f},
+			{new GoalieState(), 0.10f},
+			{new ShadowDefenseState(), 0.10f},
+			{new DribbleState(), 0.15f},
+			{new AerialState(), 0.15f}
 		});
 	}
 
@@ -255,11 +272,21 @@ int main(int argc, char* argv[]) {
 			stageSet = true;
 			render = true;
 			metrics = false;
+		} else if (arg == "--test-state=dribble") {
+			CURRENT_STAGE = TrainingStage::TEST_DRIBBLE;
+			stageSet = true;
+			render = true;
+			metrics = false;
+		} else if (arg == "--test-state=aerial") {
+			CURRENT_STAGE = TrainingStage::TEST_AERIAL;
+			stageSet = true;
+			render = true;
+			metrics = false;
 		}
 	}
 
 	if (!stageSet) {
-		std::cerr << "Error: Mandatory argument --stage=[early|mid|kickoff|late|master] or --test-state=[goalie|shadow] is missing or invalid." << std::endl;
+		std::cerr << "Error: Mandatory argument --stage=[early|mid|kickoff|late|master] or --test-state=[goalie|shadow|dribble|aerial] is missing or invalid." << std::endl;
 		return EXIT_FAILURE;
 	}
 
