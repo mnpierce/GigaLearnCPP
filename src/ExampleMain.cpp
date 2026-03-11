@@ -178,21 +178,6 @@ EnvCreateResult EnvCreateFunc(int index) {
 }
 
 void StepCallback(Learner* learner, const std::vector<GameState>& states, Report& report) {
-	// --- DEBUG OUTPUT FOR SYNC CHECK ---
-	static int stepCount = 0;
-	if (stepCount % 15 == 0) { // 15 steps * 8 tick skip = 120 ticks (~1 second)
-		auto& state = states[0];
-		if (!state.players.empty()) {
-			auto& player = state.players[0];
-			std::cout << "[C++ Sync-Check] Step: " << stepCount << " | Pos: " 
-					  << std::fixed << std::setprecision(0) << player.pos.x << ", " 
-					  << player.pos.y << ", " << player.pos.z 
-					  << " | Prev Action Array: [ ";
-			for(int i=0; i<8; i++) std::cout << player.prevAction[i] << " ";
-			std::cout << "]" << std::endl;
-		}
-	}
-	stepCount++;
 	// -----------------------------------
 
 	// To prevent expensive metrics from eating at performance, we will only run them on 1/4th of steps
