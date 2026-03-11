@@ -273,7 +273,8 @@ int main(int argc, char* argv[]) {
 	cfg.deviceType = LearnerDeviceType::GPU_CUDA;
 
 	cfg.tickSkip = 8;
-	cfg.actionDelay = cfg.tickSkip - 1; // Normal value in other RLGym frameworks
+	// cfg.actionDelay = cfg.tickSkip - 1; // Normal value in other RLGym frameworks
+	cfg.actionDelay = 0; // not actually normal, nexto did not use, essentially is just a training speed parallelization thing
 
 	// --- Common Settings (Defaults) ---
 	cfg.numGames = 512;
