@@ -88,24 +88,26 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 800.0f));
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
-		rewards.push_back(WeightedReward(new JumpTouchReward(), 200.0f));
+		// BUFFED from 200.0 to 400.0
+		rewards.push_back(WeightedReward(new JumpTouchReward(), 400.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 20.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1500.0f));
-		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
+		// NERFED from 75.0 to 20.0
+		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 20.0f));
 		rewards.push_back(WeightedReward(new KickoffReward(), 20.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 500.0f));
-		// WavedashReward removed due to exploiting normal flips
 	} else { // MASTER
 		// Core scoring and defense (Zero-sum scales down slightly to balance with resource rewards)
 		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1200.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 20.0f));
 		
 		// Refined mechanics & Kickoffs
-		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f)); 
-		rewards.push_back(WeightedReward(new JumpTouchReward(), 150.0f)); 
+		// NERFED from 75.0 to 10.0
+		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 10.0f)); 
+		// BUFFED from 150.0 to 300.0
+		rewards.push_back(WeightedReward(new JumpTouchReward(), 300.0f)); 
 		rewards.push_back(WeightedReward(new KickoffReward(), 20.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 400.0f));
-		// WavedashReward removed due to exploiting normal flips
 		
 		// Resource Management & Strategy
 		rewards.push_back(WeightedReward(new PickupBoostReward(), 10.0f)); // Path over pads
@@ -124,9 +126,16 @@ EnvCreateResult EnvCreateFunc(int index) {
 			new NoTouchCondition(3), // Just 3 seconds to reset quickly during visual tests
 			new GoalScoreCondition()
 		};
-	} else {
+	} else if (CURRENT_STAGE == TrainingStage::LATE || CURRENT_STAGE == TrainingStage::MASTER) {
+		// Nexto Inspired: 30 second timeouts in late stages allow complex plays to develop (rotations, aerial setups)
 		terminalConditions = {
-			new NoTouchCondition(10), // 10 seconds
+			new NoTouchCondition(30),
+			new GoalScoreCondition()
+		};
+	} else {
+		// 15 seconds for EARLY/MID/KICKOFF (Increased slightly from 10s)
+		terminalConditions = {
+			new NoTouchCondition(15),
 			new GoalScoreCondition()
 		};
 	}
