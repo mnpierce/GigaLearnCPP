@@ -28,13 +28,13 @@ using namespace RLGC; // RLGymCPP
 enum TrainingStage {
 	EARLY,  // 0-100M steps: Learn to touch ball
 	MID,    // 100M-1B steps: Learn to score
-	KICKOFF, // First-touch speedflip arms race
 	LATE,   // 1B-5B steps: Advanced mechanics & kickoffs
 	MASTER, // 5B+ steps: Boost management, defense, and strategy
 	TEST_GOALIE,  // Visual test mode for goalie state
 	TEST_SHADOW,  // Visual test mode for shadow state
-	TEST_DRIBBLE, // Visual test mode for dribble state
-	TEST_AERIAL   // Visual test mode for aerial state
+	TEST_DRIBBLE,  // Visual test mode for dribble state
+	TEST_AERIAL,   // Visual test mode for aerial state
+	TEST_KICKOFF   // Visual test mode for kickoff state
 };
 
 // ** CHANGE THIS TO SWITCH STAGES **
@@ -80,12 +80,6 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 10.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1000.0f));
 		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
-	} else if (CURRENT_STAGE == TrainingStage::KICKOFF) {
-		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
-		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 10.0f));
-		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1000.0f));
-		rewards.push_back(WeightedReward(new KickoffReward(), 20.0f));
-		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 800.0f));
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
 		// BUFFED from 200.0 to 400.0
@@ -116,7 +110,12 @@ EnvCreateResult EnvCreateFunc(int index) {
 
 	std::vector<TerminalCondition*> terminalConditions;
 	
-	if (CURRENT_STAGE == TrainingStage::TEST_DRIBBLE || CURRENT_STAGE == TrainingStage::TEST_AERIAL) {
+	if (CURRENT_STAGE == TrainingStage::TEST_KICKOFF) {
+		terminalConditions = {
+			new TimeoutCondition(6.0f), // 6-second timeout — enough to see who wins the kickoff
+			new GoalScoreCondition()
+		};
+	} else if (CURRENT_STAGE == TrainingStage::TEST_DRIBBLE || CURRENT_STAGE == TrainingStage::TEST_AERIAL) {
 		terminalConditions = {
 			new TimeoutCondition(5.0f), // Hard 5-second timeout to cycle through variations quickly
 			new GoalScoreCondition()
@@ -133,7 +132,7 @@ EnvCreateResult EnvCreateFunc(int index) {
 			new GoalScoreCondition()
 		};
 	} else {
-		// 15 seconds for EARLY/MID/KICKOFF (Increased slightly from 10s)
+		// 15 seconds for EARLY/MID (Increased slightly from 10s)
 		terminalConditions = {
 			new NoTouchCondition(15),
 			new GoalScoreCondition()
@@ -161,11 +160,6 @@ EnvCreateResult EnvCreateFunc(int index) {
 			{new GoalieState(), 0.1f},
 			{new ShadowDefenseState(), 0.1f}
 		});
-	} else if (CURRENT_STAGE == TrainingStage::KICKOFF) {
-		result.stateSetter = new CombinedState({
-			{new RandomState(true, true, false), 0.15f},
-			{new KickoffState(), 0.85f}
-		});
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		result.stateSetter = new CombinedState({
 			{new RandomState(true, true, false), 0.05f},
@@ -183,6 +177,8 @@ EnvCreateResult EnvCreateFunc(int index) {
 		result.stateSetter = new DribbleState();
 	} else if (CURRENT_STAGE == TrainingStage::TEST_AERIAL) {
 		result.stateSetter = new AerialState();
+	} else if (CURRENT_STAGE == TrainingStage::TEST_KICKOFF) {
+		result.stateSetter = new KickoffState();
 	} else { // MASTER
 		// In high level 1v1, kickoffs are critical, but so is awkward field positioning.
 		result.stateSetter = new CombinedState({
@@ -262,9 +258,6 @@ int main(int argc, char* argv[]) {
 		} else if (arg == "--stage=mid") {
 			CURRENT_STAGE = TrainingStage::MID;
 			stageSet = true;
-		} else if (arg == "--stage=kickoff") {
-			CURRENT_STAGE = TrainingStage::KICKOFF;
-			stageSet = true;
 		} else if (arg == "--stage=late") {
 			CURRENT_STAGE = TrainingStage::LATE;
 			stageSet = true;
@@ -291,11 +284,16 @@ int main(int argc, char* argv[]) {
 			stageSet = true;
 			render = true;
 			metrics = false;
+		} else if (arg == "--test-state=kickoff") {
+			CURRENT_STAGE = TrainingStage::TEST_KICKOFF;
+			stageSet = true;
+			render = true;
+			metrics = false;
 		}
 	}
 
 	if (!stageSet) {
-		std::cerr << "Error: Mandatory argument --stage=[early|mid|kickoff|late|master] or --test-state=[goalie|shadow|dribble|aerial] is missing or invalid." << std::endl;
+		std::cerr << "Error: Mandatory argument --stage=[early|mid|late|master] or --test-state=[goalie|shadow|dribble|aerial|kickoff] is missing or invalid." << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -315,6 +313,8 @@ int main(int argc, char* argv[]) {
 	// --- Common Settings (Defaults) ---
 	cfg.numGames = 512;
 	cfg.ppo.epochs = 3; // keep at 2 or 3 (community suggestion)
+
+	cfg.enableKickoffMacro = true; // Hardcoded speedflip overrides neural net during kickoff
 
 	cfg.sendMetrics = metrics;
 	cfg.metricsProjectName = "gigalearncpp";
@@ -378,18 +378,6 @@ int main(int argc, char* argv[]) {
 		cfg.ppo.criticLR = 1.5e-4;
 		cfg.ppo.gaeGamma = 0.993f;
 		cfg.ppo.entropyScale = 0.0225f;
-	} else if (CURRENT_STAGE == KICKOFF) {
-		cfg.checkpointFolder = "checkpoints/kickoff";
-		cfg.metricsRunName = "kickoff";
-		cfg.tsPerVersion = 50'000'000;
-		cfg.tsPerSave = 100'000'000;
-		cfg.ppo.tsPerItr = 150000;
-		cfg.ppo.batchSize = 150000;
-		cfg.ppo.miniBatchSize = 37500;
-		cfg.ppo.policyLR = 1.3e-4;
-		cfg.ppo.criticLR = 1.3e-4;
-		cfg.ppo.gaeGamma = 0.994f;
-		cfg.ppo.entropyScale = 0.015f;
 	} else if (CURRENT_STAGE == LATE) {
 		cfg.checkpointFolder = "checkpoints/late";
 		cfg.metricsRunName = "late";
@@ -405,6 +393,14 @@ int main(int argc, char* argv[]) {
 		cfg.ppo.entropyScale = 0.01f;
 	} else if (CURRENT_STAGE == TEST_GOALIE || CURRENT_STAGE == TEST_SHADOW) {
 		cfg.checkpointFolder = "checkpoints/mid"; // Load from mid for testing
+		cfg.metricsRunName = "test";
+		cfg.tsPerVersion = 100'000'000;
+		cfg.tsPerSave = 500'000'000;
+		cfg.ppo.tsPerItr = 100'000;
+		cfg.ppo.batchSize = 100'000;
+		cfg.ppo.miniBatchSize = 25'000;
+	} else if (CURRENT_STAGE == TEST_KICKOFF) {
+		cfg.checkpointFolder = "checkpoints/master";
 		cfg.metricsRunName = "test";
 		cfg.tsPerVersion = 100'000'000;
 		cfg.tsPerSave = 500'000'000;
