@@ -87,6 +87,7 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 		envSetConfig.tickSkip = config.tickSkip;
 		envSetConfig.actionDelay = config.actionDelay;
 		envSetConfig.saveRewards = config.addRewardsToMetrics;
+		envSetConfig.enableKickoffMacro = config.enableKickoffMacro;
 		envSet = new RLGC::EnvSet(envSetConfig);
 		obsSize = envSet->state.obs.size[1];
 		numActions = envSet->actionParsers[0]->GetActionAmount();

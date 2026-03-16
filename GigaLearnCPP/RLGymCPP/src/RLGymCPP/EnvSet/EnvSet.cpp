@@ -1,5 +1,6 @@
 #include "EnvSet.h"
 #include  "../Rewards/ZeroSumReward.h"
+#include <cmath>
 
 template<bool RLGC::PlayerEventState::* DATA_VAR>
 void IncPlayerCounter(Car* car, void* userInfoPtr) {
@@ -102,12 +103,19 @@ RLGC::EnvSet::EnvSet(const EnvSetConfig& config) : config(config) {
 		state.actionMasks = DimList2<uint8_t>(state.numPlayers, actionParsers[0]->GetActionAmount());
 	}
 
+	// Initialize per-arena kickoff macro state
+	if (config.enableKickoffMacro) {
+		kickoffMacros.resize(arenas.size());
+		for (int i = 0; i < arenas.size(); i++)
+			kickoffMacros[i].resize(arenas[i]->_cars.size());
+	}
+
 	// Reset all arenas initially
 	g_ThreadPool.StartBatchedJobs(
 		std::bind(&RLGC::EnvSet::ResetArena, this, std::placeholders::_1),
 		config.numArenas, false
 	);
-	
+
 }
 
 void RLGC::EnvSet::StepFirstHalf(bool async) {
@@ -124,7 +132,29 @@ void RLGC::EnvSet::StepFirstHalf(bool async) {
 		gs.ResetBeforeStep();
 
 		// Step arena with old actions
-		arena->Step(config.actionDelay);
+		if (config.actionDelay > 0) {
+			// If kickoff macro is active, step per-tick with macro controls
+			bool macroActive = false;
+			if (config.enableKickoffMacro && !kickoffMacros.empty()) {
+				for (auto& macro : kickoffMacros[arenaIdx])
+					if (macro.IsActive()) { macroActive = true; break; }
+			}
+
+			if (macroActive) {
+				for (int t = 0; t < config.actionDelay; t++) {
+					auto macroCarItr = arena->_cars.begin();
+					for (int i = 0; i < kickoffMacros[arenaIdx].size(); i++, macroCarItr++) {
+						auto& macro = kickoffMacros[arenaIdx][i];
+						if (macro.IsActive()) {
+							(*macroCarItr)->controls = macro.GetControls((*macroCarItr)->GetState());
+						}
+					}
+					arena->Step(1);
+				}
+			} else {
+				arena->Step(config.actionDelay);
+			}
+		}
 	};
 
 	g_ThreadPool.StartBatchedJobs(fnStepArena, arenas.size(), async);
@@ -138,7 +168,18 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 		auto& gs = state.gameStates[arenaIdx];
 		int playerStartIdx = state.arenaPlayerStartIdx[arenaIdx];
 			
-		// Parse and set actions
+		// Check if any kickoff macro is active for this arena
+		bool macroActive = false;
+		if (config.enableKickoffMacro && !kickoffMacros.empty()) {
+			for (auto& macro : kickoffMacros[arenaIdx]) {
+				if (macro.IsActive()) {
+					macroActive = true;
+					break;
+				}
+			}
+		}
+
+		// Parse and set actions from the neural net
 		auto actions = std::vector<Action>(gs.players.size());
 		auto carItr = arena->_cars.begin();
 		for (int i = 0; i < gs.players.size(); i++, carItr++) {
@@ -152,7 +193,44 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 		// Step arena with new actions we got from observing the last state
 		// Update the gamestate after
 		{
-			arena->Step(config.tickSkip - config.actionDelay);
+			int ticksToStep = config.tickSkip - config.actionDelay;
+
+			if (macroActive) {
+				// Kickoff macro: step 1 tick at a time with hardcoded controls
+				for (int t = 0; t < ticksToStep; t++) {
+					auto macroCarItr = arena->_cars.begin();
+					for (int i = 0; i < kickoffMacros[arenaIdx].size(); i++, macroCarItr++) {
+						auto& macro = kickoffMacros[arenaIdx][i];
+						if (macro.IsActive()) {
+							CarControls ctrl = macro.GetControls((*macroCarItr)->GetState());
+							(*macroCarItr)->controls = ctrl;
+
+							// DEBUG: log state transitions for first arena, first player
+							if (arenaIdx == 0 && i == 0) {
+								int tc = macro.tickCounter;
+								auto st = macro.state;
+								// Log on key state transitions
+								if (tc <= 2 || st == SpeedflipMacro::State::Align ||
+								    st == SpeedflipMacro::State::FirstJump || st == SpeedflipMacro::State::Dodge ||
+								    st == SpeedflipMacro::State::Cancel || st == SpeedflipMacro::State::Done) {
+									auto carState = (*macroCarItr)->GetState();
+									float yawDeg = std::atan2(carState.rotMat.forward.y, carState.rotMat.forward.x) * (180.0f / 3.14159f);
+									RG_LOG("[Macro t=" << tc << "] pos=(" << carState.pos.x << "," << carState.pos.y << ")"
+										<< " yaw=" << yawDeg << "deg"
+										<< " ctrl=(thr=" << ctrl.throttle << " str=" << ctrl.steer
+										<< " pit=" << ctrl.pitch << " yaw=" << ctrl.yaw
+										<< " rol=" << ctrl.roll << " jmp=" << ctrl.jump << " bst=" << ctrl.boost << ")"
+										<< " dir=" << macro.direction << " yawStr=" << macro.yawStrength);
+								}
+							}
+						}
+						// If macro just finished, car keeps the neural net action set above
+					}
+					arena->Step(1);
+				}
+			} else {
+				arena->Step(ticksToStep);
+			}
 
 			if (eventTrackers[arenaIdx])
 				eventTrackers[arenaIdx]->Update(arena);
@@ -260,6 +338,25 @@ void RLGC::EnvSet::ResetArena(int index) {
 	state.gameStates[index] = newState;
 
 	newState.userInfo = userInfos[index];
+
+	// Start kickoff macro if enabled and arena is in a kickoff state (ball near origin)
+	if (config.enableKickoffMacro && !kickoffMacros.empty()) {
+		Arena* arena = arenas[index];
+		Vec ballPos = arena->ball->GetState().pos;
+		float ballDistXY = std::sqrt(ballPos.x * ballPos.x + ballPos.y * ballPos.y);
+		bool isKickoff = (ballDistXY < 100.0f);
+
+		auto carItr = arena->_cars.begin();
+		for (int i = 0; i < kickoffMacros[index].size(); i++, carItr++) {
+			if (isKickoff) {
+				auto carState = (*carItr)->GetState();
+				Vec carPos = carState.pos;
+				kickoffMacros[index][i].Start(carState, ballPos);
+			} else {
+				kickoffMacros[index][i].Reset();
+			}
+		}
+	}
 
 	// Update event tracker
 	if (eventTrackers[index])

@@ -8,6 +8,7 @@
 #include "../StateSetters/StateSetter.h"
 #include "../ThreadPool.h"
 #include <RLGymCPP/Rewards/Reward.h>
+#include "../SpeedflipMacro.h"
 
 namespace RLGC {
 
@@ -30,6 +31,7 @@ namespace RLGC {
 		int actionDelay;
 		bool saveRewards;
 		bool shuffleRewardSampling = true;
+		bool enableKickoffMacro = false; // When true, hardcoded speedflip overrides neural net during kickoff
 	};
 
 	struct EnvState {
@@ -83,6 +85,9 @@ namespace RLGC {
 		std::vector<ObsBuilder*> obsBuilders;
 		std::vector<ActionParser*> actionParsers;
 		std::vector<StateSetter*> stateSetters;
+
+		// Per-arena, per-player kickoff macro state
+		std::vector<std::vector<SpeedflipMacro>> kickoffMacros;
 
 		EnvState state = {};
 

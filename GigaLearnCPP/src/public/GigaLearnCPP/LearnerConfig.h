@@ -71,5 +71,8 @@ namespace GGL {
 		float trainAgainstOldChance = 0.15f; // Chance (from 0 - 1) that an iteration will train against an old version
 
 		SkillTrackerConfig skillTracker = {};
+
+		// When true, hardcoded speedflip macro overrides neural net during kickoff
+		bool enableKickoffMacro = false;
 	};
 }
