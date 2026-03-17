@@ -225,3 +225,34 @@ public:
         return 0.0f; // Logic handled in GetAllRewards
     }
 };
+
+class AsymmetricBoostReward : public Reward {
+    float gainScale;
+    float lossScale;
+
+public:
+    virtual std::string GetName() override { return "AsymmetricBoostReward"; }
+
+    AsymmetricBoostReward(float gainScale = 1.5f, float lossScale = 0.8f)
+        : gainScale(gainScale), lossScale(lossScale) {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (!player.prev)
+            return 0.0f;
+
+        float delta = player.boost - player.prev->boost;
+
+        if (delta > 0.0f) {
+            // Gain: concave sqrt curve — picking up boost when empty is worth more
+            return gainScale * sqrtf(delta / 100.0f);
+        } else if (delta < 0.0f) {
+            // Loss: linear penalty, scaled by height — zero penalty at/above goal height
+            float heightRatio = player.pos.z / CommonValues::GOAL_HEIGHT;
+            heightRatio = std::max(0.0f, std::min(1.0f, heightRatio));
+            // delta is negative, so this produces a negative reward (penalty)
+            return lossScale * (delta / 100.0f) * (1.0f - heightRatio);
+        }
+
+        return 0.0f;
+    }
+};

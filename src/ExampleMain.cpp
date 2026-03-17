@@ -80,6 +80,7 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new ZeroSumReward(new CustomVelocityBallToGoalReward(), 0.0f), 10.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1000.0f));
 		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 75.0f));
+		rewards.push_back(WeightedReward(new AsymmetricBoostReward(), 3.0f));
 	} else if (CURRENT_STAGE == TrainingStage::LATE) {
 		rewards.push_back(WeightedReward(new SpeedTowardBallReward(), 5.0f));
 		// BUFFED from 200.0 to 400.0
@@ -90,6 +91,7 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new AdvancedTouchReward(0.05f, 1.0f, 300.0f), 20.0f));
 		rewards.push_back(WeightedReward(new KickoffReward(), 20.0f));
 		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 500.0f));
+		rewards.push_back(WeightedReward(new AsymmetricBoostReward(), 5.0f));
 	} else { // MASTER
 		// Core scoring and defense (Zero-sum scales down slightly to balance with resource rewards)
 		rewards.push_back(WeightedReward(new ZeroSumReward(new GoalReward(0.0f), 0.0f), 1200.0f));
@@ -104,7 +106,7 @@ EnvCreateResult EnvCreateFunc(int index) {
 		rewards.push_back(WeightedReward(new ZeroSumReward(new FirstTouchKickoffReward(), 0.0f), 400.0f));
 		
 		// Resource Management & Strategy
-		rewards.push_back(WeightedReward(new PickupBoostReward(), 10.0f)); // Path over pads
+		rewards.push_back(WeightedReward(new AsymmetricBoostReward(), 8.0f)); // Asymmetric: gain rewarded, ground-loss penalized, aerial-free
 		rewards.push_back(WeightedReward(new DemoReward(), 50.0f)); // Encourage physical disruption
 	}
 
@@ -409,7 +411,7 @@ int main(int argc, char* argv[]) {
 		cfg.ppo.miniBatchSize = 25'000;
 	} else { // MASTER
 		cfg.checkpointFolder = "checkpoints/master";
-		cfg.metricsRunName = "master";
+		cfg.metricsRunName = "master-v2"; // v2 just for adding kickoff and boost reward (change back for next full run)
 		cfg.tsPerVersion = 100'000'000;
 		cfg.tsPerSave = 500'000'000;
 		cfg.ppo.tsPerItr = 300'000;
