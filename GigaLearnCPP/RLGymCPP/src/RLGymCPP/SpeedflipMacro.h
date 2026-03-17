@@ -66,7 +66,7 @@ struct SpeedflipMacro {
 	Vec   initialPosition = {};   // Car's position at spawn
 
 	// Per-spawn parameters
-	float totalDriveDistance = 290.0f;  // UU to travel before jumping
+	float totalDriveDistance = 230.0f;  // UU to travel before jumping
 	float initialAngle      = 0.0f;    // Target alignment angle (radians)
 
 	bool IsActive() const {
@@ -85,7 +85,7 @@ struct SpeedflipMacro {
 		cachedControls    = {};
 		initialForward    = {};
 		initialPosition   = {};
-		totalDriveDistance = 290.0f;
+		totalDriveDistance = 230.0f;
 		initialAngle      = 0.0f;
 	}
 
@@ -112,29 +112,27 @@ struct SpeedflipMacro {
 		float absX = std::abs(carPos.x);
 
 		if (absX < 25.0f) {
-			// Center kickoff
+			// Center kickoff — reduced angle so alignment finishes sooner,
+			// producing a lower dodge speed (~1065 sps vs 1355 before).
 			direction         = -1.0f;
-			yawStrength       = 1.0f;
-			alignSteer        = 0.2f;  // RocketSim steer ~5x faster than real game
-			totalDriveDistance = 290.0f;
-			initialAngle      = 3.14159265f / 22.0f;
+			yawStrength       = 0.35f;
+			alignSteer        = 1.0f;  // Match RLBot's full-lock steering
+			totalDriveDistance = 230.0f;
+			initialAngle      = 3.14159265f / 30.0f;  // ~6°
 		} else if (absX < 500.0f) {
-			// Near kickoff — steer=0.7 balances between 0.6 (too little) and 0.8 (too much).
-			// Coast from alignment to driveDist=350 carries angular momentum.
+			// Near kickoff — reduced driveDist for earlier landing.
 			direction         = -(carPos.x > 0.0f ? 1.0f : -1.0f);
-			yawStrength       = 0.6f;
+			yawStrength       = 0.15f;
 			alignSteer        = 0.68f;
-			totalDriveDistance = 350.0f;
+			totalDriveDistance = 280.0f;
 			initialAngle      = 3.14159265f / 16.0f;  // 11.25°
 		} else {
-			// Corner kickoff — steer=0.6 builds angle fast enough to hit π/16 at t≈57
-			// (dist≈243), then coast to driveDist=300 carries ~4° via angular momentum.
-			// Total rotation ≈ 18° at dodge, jump 80UU earlier than steer=0.4 approach.
+			// Corner kickoff — reduced driveDist for earlier landing.
 			direction         = (carPos.x > 0.0f ? 1.0f : -1.0f);
 			yawStrength       = 0.4f;
 			alignSteer        = 0.6f;
-			totalDriveDistance = 300.0f;
-			initialAngle      = 3.14159265f / 16.0f;  // 11.25° — reached at dist≈243
+			totalDriveDistance = 360.0f;
+			initialAngle      = 3.14159265f / 16.0f;  // 11.25°
 		}
 
 		// Correct for team facing direction
@@ -314,7 +312,7 @@ struct SpeedflipMacro {
 			ctrl.throttle = 1.0f;
 			ctrl.boost    = (speed < 2295.0f);
 			ctrl.pitch    = 1.0f;
-			ctrl.yaw      = -yawStrength * direction;  // Negated: RocketSim air yaw inverted
+			ctrl.yaw      = yawStrength * direction;  // Matches bot.py: yaw = yawStr * dir
 			cachedControls = ctrl;
 			return ctrl;
 		}
