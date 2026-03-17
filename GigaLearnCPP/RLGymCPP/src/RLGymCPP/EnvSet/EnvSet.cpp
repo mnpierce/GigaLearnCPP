@@ -204,25 +204,6 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 						if (macro.IsActive()) {
 							CarControls ctrl = macro.GetControls((*macroCarItr)->GetState());
 							(*macroCarItr)->controls = ctrl;
-
-							// DEBUG: log state transitions for first arena, first player
-							if (arenaIdx == 0 && i == 0) {
-								int tc = macro.tickCounter;
-								auto st = macro.state;
-								// Log on key state transitions
-								if (tc <= 2 || st == SpeedflipMacro::State::Align ||
-								    st == SpeedflipMacro::State::FirstJump || st == SpeedflipMacro::State::Dodge ||
-								    st == SpeedflipMacro::State::Cancel || st == SpeedflipMacro::State::Done) {
-									auto carState = (*macroCarItr)->GetState();
-									float yawDeg = std::atan2(carState.rotMat.forward.y, carState.rotMat.forward.x) * (180.0f / 3.14159f);
-									RG_LOG("[Macro t=" << tc << "] pos=(" << carState.pos.x << "," << carState.pos.y << ")"
-										<< " yaw=" << yawDeg << "deg"
-										<< " ctrl=(thr=" << ctrl.throttle << " str=" << ctrl.steer
-										<< " pit=" << ctrl.pitch << " yaw=" << ctrl.yaw
-										<< " rol=" << ctrl.roll << " jmp=" << ctrl.jump << " bst=" << ctrl.boost << ")"
-										<< " dir=" << macro.direction << " yawStr=" << macro.yawStrength);
-								}
-							}
 						}
 						// If macro just finished, car keeps the neural net action set above
 					}

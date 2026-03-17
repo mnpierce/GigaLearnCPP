@@ -34,19 +34,7 @@ struct SpeedflipMacro {
 		Done
 	};
 
-	static const char* StateName(State s) {
-		switch (s) {
-			case State::Inactive:    return "Inactive";
-			case State::Drive:       return "Drive";
-			case State::Align:       return "Align";
-			case State::FirstJump:   return "FirstJump";
-			case State::ReleaseJump: return "ReleaseJump";
-			case State::Dodge:       return "Dodge";
-			case State::Cancel:      return "Cancel";
-			case State::Done:        return "Done";
-			default: return "?";
-		}
-	}
+
 
 
 	State state         = State::Inactive;
@@ -140,10 +128,6 @@ struct SpeedflipMacro {
 			direction = -direction;
 
 		state = State::Drive;
-		RG_LOG("[MACRO START] pos=(" << carPos.x << "," << carPos.y << ") absX=" << absX
-			<< " dir=" << direction << " yawStr=" << yawStrength
-			<< " driveDist=" << totalDriveDistance << " angle=" << initialAngle
-			<< " fwd=(" << initialForward.x << "," << initialForward.y << ")");
 	}
 
 	// Get controls based on the current car physics state.
@@ -192,19 +176,7 @@ struct SpeedflipMacro {
 
 		bool isOnGround = carState.isOnGround;
 
-		// --- Diagnostic: log at state machine updates ---
-		float yawDeg = std::atan2(curForward.y, curForward.x) * (180.0f / 3.14159265f);
-		float speed = carState.vel.Length();
-		float angVelZ = carState.angVel.z;
-		// Only log at update boundaries (not every per-tick for jump states)
-		if (!isPerTickState || state == State::FirstJump && !isOnGround ||
-		    state == State::Dodge && dodgeCount == 0) {
-			RG_LOG("[MACRO t=" << tickCounter << " st=" << StateName(state)
-				<< "] pos=(" << curPos.x << "," << curPos.y << "," << curPos.z << ")"
-				<< " yaw=" << yawDeg << "deg dist=" << distance
-				<< " spd=" << speed << " angZ=" << angVelZ
-				<< " gnd=" << isOnGround);
-		}
+
 
 		CarControls ctrl = {};
 
@@ -286,8 +258,6 @@ struct SpeedflipMacro {
 				ctrl.pitch = -1.0f;
 				ctrl.yaw   = -direction;
 				cachedControls = ctrl;
-				RG_LOG("[MACRO DODGE] dir=" << direction << " yaw=" << -direction
-					<< " pos=(" << curPos.x << "," << curPos.y << "," << curPos.z << ") t=" << tickCounter);
 				return ctrl;
 			} else if (dodgeCount < UPDATE_INTERVAL) {
 				// Subsequent ticks: keep holding the same dodge controls
@@ -305,7 +275,6 @@ struct SpeedflipMacro {
 			if (isOnGround) {
 				state = State::Done;
 				cachedControls = {};
-				RG_LOG("[MACRO DONE] pos=(" << curPos.x << "," << curPos.y << ") dist=" << distance << " t=" << tickCounter);
 				return {};
 			}
 			float speed = carState.vel.Length();
