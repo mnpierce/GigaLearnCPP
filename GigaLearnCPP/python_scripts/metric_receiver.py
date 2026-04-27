@@ -15,6 +15,13 @@ def init(py_exec_path, project, group, name, id = None):
 	
 	# Clean and make path absolute
 	py_exec_path = os.path.abspath(py_exec_path.lstrip("@"))
+	
+	if not os.path.exists(py_exec_path):
+		# Fallback if hardcoded path from C++ compile-time is broken (e.g. OneDrive path change)
+		fallback_venv = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), ".venv", "Scripts", "python.exe"))
+		if os.path.exists(fallback_venv):
+			py_exec_path = fallback_venv
+
 	sys.executable = py_exec_path
 	
 	print(f"DEBUG: Python version: {sys.version}")
