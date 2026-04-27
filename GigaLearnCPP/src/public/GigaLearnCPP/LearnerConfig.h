@@ -4,6 +4,25 @@
 #include "SkillTrackerConfig.h"
 
 namespace GGL {
+
+	// Cosine annealing with warm restarts for LR and entropy
+	struct CosineAnnealingConfig {
+		bool enabled = false;
+
+		// Cycle length in timesteps (e.g. 5'000'000'000 = 5B steps)
+		int64_t cyclePeriod = 5'000'000'000;
+
+		// LR bounds
+		float policyLRMax = 1e-4f;
+		float policyLRMin = 2e-5f;
+		float criticLRMax = 1e-4f;
+		float criticLRMin = 2e-5f;
+
+		// Entropy bounds
+		float entropyMax = 0.015f;
+		float entropyMin = 0.005f;
+	};
+
 	enum class LearnerDeviceType {
 		AUTO,
 		CPU,
@@ -74,5 +93,8 @@ namespace GGL {
 
 		// When true, hardcoded speedflip macro overrides neural net during kickoff
 		bool enableKickoffMacro = false;
+
+		// Cosine annealing scheduler for LR and entropy
+		CosineAnnealingConfig cosineAnnealing = {};
 	};
 }

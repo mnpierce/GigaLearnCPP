@@ -421,6 +421,16 @@ int main(int argc, char* argv[]) {
 		cfg.ppo.criticLR = 1.0e-4;
 		cfg.ppo.gaeGamma = 0.997f;
 		cfg.ppo.entropyScale = 0.005f;
+
+		// Cosine annealing with warm restarts
+		cfg.cosineAnnealing.enabled = true;
+		cfg.cosineAnnealing.cyclePeriod = 5'000'000'000; // 5B step cycles
+		cfg.cosineAnnealing.policyLRMax = 1.0e-4f;
+		cfg.cosineAnnealing.policyLRMin = 2.0e-5f;
+		cfg.cosineAnnealing.criticLRMax = 1.0e-4f;
+		cfg.cosineAnnealing.criticLRMin = 2.0e-5f;
+		cfg.cosineAnnealing.entropyMax = 0.015f;
+		cfg.cosineAnnealing.entropyMin = 0.005f;
 	}
 
 	// Make the learner with the environment creation function and the config we just made

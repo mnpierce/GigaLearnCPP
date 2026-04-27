@@ -844,6 +844,27 @@ void GGL::Learner::Start() {
 #endif
 
 				Timer learnTimer = {};
+
+				// Apply cosine annealing schedule for LR and entropy
+				if (config.cosineAnnealing.enabled && !render) {
+					auto& ca = config.cosineAnnealing;
+					int64_t tInCycle = totalTimesteps % ca.cyclePeriod;
+					float progress = (float)tInCycle / (float)ca.cyclePeriod;
+					float cosVal = 0.5f * (1.0f + cosf(3.14159265f * progress));
+
+					float curPolicyLR = ca.policyLRMin + cosVal * (ca.policyLRMax - ca.policyLRMin);
+					float curCriticLR = ca.criticLRMin + cosVal * (ca.criticLRMax - ca.criticLRMin);
+					float curEntropy  = ca.entropyMin  + cosVal * (ca.entropyMax  - ca.entropyMin);
+
+					ppo->SetLearningRates(curPolicyLR, curCriticLR);
+					ppo->config.entropyScale = curEntropy;
+
+					report["Schedule/Policy LR"] = curPolicyLR;
+					report["Schedule/Critic LR"] = curCriticLR;
+					report["Schedule/Entropy Scale"] = curEntropy;
+					report["Schedule/Cycle Progress"] = progress;
+				}
+
 				ppo->Learn(experience, report, isFirstIteration);
 				report["PPO Learn Time"] = learnTimer.Elapsed();
 
